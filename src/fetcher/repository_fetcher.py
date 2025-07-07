@@ -4,20 +4,24 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 import requests
+from .size_checker import RepoSizeChecker
 
 class RepositoryFetcher:
     """Handles downloading GitHub repositories to local storage."""
     
-    def __init__(self, base_storage_path="./data/repos"):
+    def __init__(self, base_storage_path="./data/repos", size_limit_mb=100):
         self.base_storage_path = Path(base_storage_path)
         self.base_storage_path.mkdir(parents=True, exist_ok=True)
+        self.size_checker = RepoSizeChecker(size_limit_mb)
+        self.size_limit_mb = size_limit_mb
         
-    def fetch(self, github_url, target_dir=None):
+    def fetch(self, github_url, target_dir=None, force=False):
         """Fetch a GitHub repository and store it locally.
         
         Args:
             github_url: URL to GitHub repository
             target_dir: Optional custom directory name
+            force: If True, skip size confirmation and download regardless of size
             
         Returns:
             Path to the cloned repository
@@ -43,6 +47,19 @@ class RepositoryFetcher:
         # Check repository existence on GitHub
         if not self._check_repo_exists(repo_owner, repo_name):
             raise ValueError(f"Repository {repo_owner}/{repo_name} does not exist or is not accessible")
+        
+        # Check repository size
+        is_within_limit, size_mb = self.size_checker.check_size(repo_owner, repo_name)
+        
+        if not is_within_limit and not force:
+            user_confirm = input(
+                f"Repository size is {size_mb:.1f}MB, which exceeds the limit of {self.size_limit_mb}MB. "
+                f"Do you want to continue? (y/n): "
+            ).lower()
+            
+            if user_confirm != 'y' and user_confirm != 'yes':
+                print("Download cancelled.")
+                return None
         
         # Clone the repository
         clone_url = f"https://github.com/{repo_owner}/{repo_name}.git"
