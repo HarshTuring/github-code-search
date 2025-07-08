@@ -10,6 +10,8 @@ from fetcher import RepositoryFetcher
 from parser import RepositoryParser
 from parser.models.chunk import Chunk
 
+from embeddings import EmbeddingGenerator
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -51,7 +53,9 @@ class GitHubCodeAnalyzer:
         self.current_chunks: List[Chunk] = []
         
     def analyze_github_repo(self, github_url: str, force_download: bool = False, 
-                           verbose: bool = False) -> Dict[str, Any]:
+                           verbose: bool = False, generate_embeddings: bool = False,
+                           embedding_model: str = "text-embedding-3-large",
+                           api_key: Optional[str] = None) -> Dict[str, Any]:
         """
         Analyze a GitHub repository - download, parse, and chunk it.
         
@@ -59,6 +63,9 @@ class GitHubCodeAnalyzer:
             github_url: GitHub repository URL
             force_download: Force download even if size exceeds limit
             verbose: Enable verbose logging
+            generate_embeddings: Whether to generate embeddings for chunks
+            embedding_model: Model to use for generating embeddings
+            api_key: OpenAI API key (if None, will use environment variable)
             
         Returns:
             Dict with analysis results and statistics
@@ -93,6 +100,37 @@ class GitHubCodeAnalyzer:
         except Exception as e:
             logger.error(f"Failed to generate code chunks: {e}")
             return {'success': False, 'error': f'Chunking failed: {str(e)}'}
+
+        embedding_info = {'generated': False}
+        if generate_embeddings and self.current_chunks:
+            try:
+                logger.info(f"Generating embeddings for {len(self.current_chunks)} chunks using {embedding_model}")
+                embedding_generator = EmbeddingGenerator(
+                    model_name=embedding_model,
+                    api_key=api_key
+                )
+                self.current_chunks = embedding_generator.generate_embeddings(
+                    self.current_chunks,
+                    show_progress=verbose
+                )
+                
+                embedding_count = sum(1 for chunk in self.current_chunks 
+                                    if chunk.metadata and 'embedding' in chunk.metadata)
+                
+                embedding_info = {
+                    'generated': True,
+                    'model': embedding_model,
+                    'dimension': embedding_generator.dimension,
+                    'count': embedding_count
+                }
+                
+                logger.info(f"Successfully generated {embedding_count} embeddings")
+            except Exception as e:
+                logger.error(f"Failed to generate embeddings: {e}")
+                embedding_info = {
+                    'generated': False,
+                    'error': str(e)
+                }
         
         # Step 4: Save results
         try:
@@ -106,13 +144,17 @@ class GitHubCodeAnalyzer:
         # Compile statistics
         stats = self._generate_statistics()
         
-        return {
+        # Add embedding info to the result
+        result = {
             'success': True,
             'repository': github_url,
             'download_path': str(self.current_repo_path),
             'output_path': str(output_dir),
-            'statistics': stats
+            'statistics': stats,
+            'embeddings': embedding_info
         }
+        
+        return result
     
     def save_chunks(self, output_dir: Optional[Path] = None) -> Path:
         """
@@ -145,7 +187,7 @@ class GitHubCodeAnalyzer:
                 f.write("\n")
                 f.write(chunk.content)
         
-        # Save chunk metadata
+        # Save chunk metadata (including embeddings)
         metadata_file = output_dir / "chunks_metadata.json"
         with open(metadata_file, 'w', encoding='utf-8') as f:
             chunks_data = [
@@ -156,6 +198,27 @@ class GitHubCodeAnalyzer:
                 for chunk in self.current_chunks
             ]
             json.dump(chunks_data, f, indent=2)
+            
+        # If we have embeddings, save them separately for more efficient access
+        chunks_with_embeddings = [c for c in self.current_chunks 
+                                if c.metadata and 'embedding' in c.metadata]
+                                
+        if chunks_with_embeddings:
+            embeddings_dir = output_dir / "embeddings"
+            embeddings_dir.mkdir(exist_ok=True)
+            
+            # Save embeddings in a separate file for more targeted access
+            embeddings_file = embeddings_dir / "embeddings.json"
+            with open(embeddings_file, 'w', encoding='utf-8') as f:
+                embeddings_data = {
+                    chunk.id: {
+                        "embedding": chunk.metadata['embedding'],
+                        "model": chunk.metadata.get('embedding_model', 'unknown'),
+                        "dimension": chunk.metadata.get('embedding_dimension', len(chunk.metadata['embedding']))
+                    }
+                    for chunk in chunks_with_embeddings
+                }
+                json.dump(embeddings_data, f)
         
         # Save statistics
         stats_file = output_dir / "statistics.json"
@@ -219,6 +282,7 @@ class GitHubCodeAnalyzer:
         Returns:
             Dictionary with statistics
         """
+        # Existing statistics generation code
         if not self.current_chunks:
             return {}
         
@@ -241,12 +305,35 @@ class GitHubCodeAnalyzer:
         # Calculate total content size
         total_size = sum(len(chunk.content) for chunk in self.current_chunks)
         
-        return {
+        # Count chunks with embeddings
+        embedding_count = sum(1 for chunk in self.current_chunks 
+                            if chunk.metadata and 'embedding' in chunk.metadata)
+        
+        # Check if we have embedding metadata to include
+        embedding_info = {}
+        if embedding_count > 0:
+            # Get the embedding model and dimension from the first chunk with an embedding
+            for chunk in self.current_chunks:
+                if chunk.metadata and 'embedding' in chunk.metadata:
+                    embedding_info = {
+                        'model': chunk.metadata.get('embedding_model', 'unknown'),
+                        'dimension': chunk.metadata.get('embedding_dimension', len(chunk.metadata['embedding'])),
+                        'count': embedding_count
+                    }
+                    break
+        
+        stats = {
             'total_chunks': len(self.current_chunks),
             'by_language': language_counts,
             'by_type': type_counts,
-            'total_content_size': total_size
+            'total_content_size': total_size,
         }
+        
+        # Add embedding info if available
+        if embedding_info:
+            stats['embeddings'] = embedding_info
+            
+        return stats
 
 
 def main():
@@ -255,16 +342,16 @@ def main():
         description="GitHub Repository Code Analyzer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  Analyze a repository:
-    python -m src.main https://github.com/username/repo-name
-  
-  Force download and use verbose output:
-    python -m src.main https://github.com/username/repo-name --force --verbose
+    Examples:
+    Analyze a repository:
+        python -m src.main https://github.com/username/repo-name
     
-  Specify output directory:
-    python -m src.main https://github.com/username/repo-name --output ./my_analysis
-        """
+    Force download and use verbose output:
+        python -m src.main https://github.com/username/repo-name --force --verbose
+        
+    Specify output directory:
+        python -m src.main https://github.com/username/repo-name --output ./my_analysis
+            """
     )
     
     parser.add_argument("github_url", help="GitHub repository URL to analyze")
@@ -294,6 +381,17 @@ Examples:
         default=100,
         help="Repository size limit in MB (default: 100)"
     )
+    parser.add_argument(
+        "--embeddings", "-e", 
+        action="store_true",
+        help="Generate embeddings for code chunks"
+    )
+    parser.add_argument(
+        "--embedding-model",
+        choices=["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"],
+        default="text-embedding-3-small",
+        help="OpenAI model to use for embeddings"
+    )
     
     args = parser.parse_args()
     
@@ -308,12 +406,14 @@ Examples:
             output_path=args.output,
             size_limit_mb=args.size_limit
         )
-        
         # Run analysis
         result = analyzer.analyze_github_repo(
             args.github_url,
             force_download=args.force,
-            verbose=args.verbose
+            verbose=args.verbose,
+            generate_embeddings=args.embeddings,
+            embedding_model=args.embedding_model,
+            api_key=""
         )
         
         if result['success']:
@@ -334,6 +434,25 @@ Examples:
             logger.info("\n  Chunks by type:")
             for chunk_type, count in stats['by_type'].items():
                 logger.info(f"    {chunk_type}: {count}")
+            
+            # Print embedding info if available
+            if 'embeddings' in stats:
+                embedding_info = stats['embeddings']
+                logger.info("\n  Embeddings:")
+                logger.info(f"    Model: {embedding_info['model']}")
+                logger.info(f"    Dimension: {embedding_info['dimension']}")
+                logger.info(f"    Count: {embedding_info['count']}")
+            elif args.embeddings:
+                embedding_info = result.get('embeddings', {})
+                if embedding_info.get('generated'):
+                    logger.info("\n  Embeddings:")
+                    logger.info(f"    Model: {embedding_info['model']}")
+                    logger.info(f"    Dimension: {embedding_info['dimension']}")
+                    logger.info(f"    Count: {embedding_info['count']}")
+                else:
+                    logger.warning("\n  Embedding generation failed:")
+                    if 'error' in embedding_info:
+                        logger.warning(f"    Error: {embedding_info['error']}")
                 
             return 0
         else:
