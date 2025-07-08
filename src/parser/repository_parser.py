@@ -8,6 +8,7 @@ from .file_type_detector import FileTypeDetector
 from .language_parsers.python_parser import PythonParser
 from .language_parsers.base_parser import BaseParser
 from .language_parsers.javascript_parser import JavaScriptParser
+from .language_parsers.infrastructure_parser import InfrastructureParser
 
 
 class RepositoryParser:
@@ -27,13 +28,38 @@ class RepositoryParser:
             "javascript": JavaScriptParser(),
             "typescript": JavaScriptParser(),
             "jsx": JavaScriptParser(),
+            "yaml": InfrastructureParser(),
+            "json": InfrastructureParser(),
+            "dockerfile": InfrastructureParser(),
+            "terraform": InfrastructureParser(),
+            "shell": InfrastructureParser(),
             # Add other language parsers here
         }
+        self.infrastructure_parser = InfrastructureParser()
+
         
     def parse(self) -> RepositoryStructure:
         """Parse the repository structure."""
         # Traverse the repository
         self._discover_files()
+        
+        # Second pass: Check for infrastructure files specifically
+        infrastructure_files = []
+        for file_path, file_info in self.repo_structure.files.items():
+            # Skip binary files
+            if file_info.is_binary:
+                continue
+                
+            path_obj = Path(file_path)
+            
+            # Check if this might be an infrastructure file
+            config_type = self.infrastructure_parser._detect_config_type(path_obj)
+            if config_type:
+                # This is an infrastructure file, re-parse it with the infrastructure parser
+                updated_file_info = self.infrastructure_parser.parse_file(path_obj)
+                # Update the file info
+                self.repo_structure.files[file_path] = updated_file_info
+        
         return self.repo_structure
         
     def create_chunks(self, verbose=False) -> List[Chunk]:
