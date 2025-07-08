@@ -1,11 +1,12 @@
 import os
 import time
 import logging
+import re
 from typing import List, Dict, Any, Optional, Union
 import openai
 import numpy as np
 
-# from ..parser.models.chunk import Chunk
+# Fix the import path
 from parser.models.chunk import Chunk
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,20 @@ class EmbeddingGenerator:
         "text-embedding-ada-002": 1536  # Legacy model
     }
     
+    # Token limits
+    MODEL_TOKEN_LIMITS = {
+        "text-embedding-3-small": 8192,
+        "text-embedding-3-large": 8192,
+        "text-embedding-ada-002": 8191
+    }
+    
     def __init__(self, 
                  model_name: str = "text-embedding-3-small", 
                  api_key: Optional[str] = None,
                  batch_size: int = 20,
                  max_retries: int = 5,
-                 retry_delay: int = 2):
+                 retry_delay: int = 2,
+                 max_tokens: Optional[int] = None):
         """
         Initialize the embedding generator with specified parameters.
         
@@ -43,6 +52,7 @@ class EmbeddingGenerator:
             batch_size: Number of chunks to process in each API call
             max_retries: Maximum number of retry attempts for failed calls
             retry_delay: Base delay between retries (uses exponential backoff)
+            max_tokens: Maximum tokens to allow (defaults to model's limit)
         """
         self.model_name = model_name
         
@@ -56,6 +66,11 @@ class EmbeddingGenerator:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         
+        # Set token limit
+        self.max_tokens = max_tokens or self.MODEL_TOKEN_LIMITS.get(model_name, 8000)
+        # Add a safety margin
+        self.max_tokens = int(self.max_tokens * 0.95)
+        
         # Set up OpenAI client
         api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -63,7 +78,7 @@ class EmbeddingGenerator:
         
         self.client = openai.OpenAI(api_key=api_key)
         
-        logger.info(f"Initialized EmbeddingGenerator with model {model_name} (dimension {self.dimension})")
+        logger.info(f"Initialized EmbeddingGenerator with model {model_name} (dimension {self.dimension}, max tokens {self.max_tokens})")
 
     def generate_embeddings(self, chunks: List[Chunk], show_progress: bool = True) -> List[Chunk]:
         """
@@ -76,7 +91,6 @@ class EmbeddingGenerator:
         Returns:
             List of chunks with embeddings attached
         """
-        print("GENERATE EMBEDDINGS CALLED", "\n\n\n\n")
         if not chunks:
             logger.warning("No chunks provided to generate embeddings")
             return []
@@ -86,30 +100,67 @@ class EmbeddingGenerator:
         
         processed_chunks = []
         batch_count = (total_chunks + self.batch_size - 1) // self.batch_size
+        skipped_chunks = 0
         
         for i in range(0, total_chunks, self.batch_size):
             batch = chunks[i:i+self.batch_size]
-            batch_texts = [self._prepare_chunk_text(chunk) for chunk in batch]
+            batch_texts = []
+            valid_indices = []
+            
+            # Prepare texts and track which ones are valid
+            for j, chunk in enumerate(batch):
+                try:
+                    text = self._prepare_chunk_text(chunk)
+                    # Estimate tokens and skip if too large
+                    est_tokens = self._estimate_tokens(text)
+                    if est_tokens > self.max_tokens:
+                        # Try to truncate
+                        text = self._truncate_text(text, self.max_tokens)
+                        est_tokens = self._estimate_tokens(text)
+                        if est_tokens > self.max_tokens:
+                            logger.warning(f"Skipping chunk {chunk.id} ({chunk.chunk_type}) - too large even after truncation: ~{est_tokens} tokens")
+                            continue
+                    
+                    batch_texts.append(text)
+                    valid_indices.append(j)
+                except Exception as e:
+                    logger.error(f"Error preparing chunk {chunk.id}: {str(e)}")
+                    continue
+            
+            if not batch_texts:
+                # Skip this batch if all chunks were filtered out
+                skipped_chunks += len(batch)
+                continue
             
             if show_progress:
                 current_batch = i // self.batch_size + 1
-                logger.info(f"Processing batch {current_batch}/{batch_count} ({len(batch)} chunks)")
+                logger.info(f"Processing batch {current_batch}/{batch_count} ({len(batch_texts)}/{len(batch)} chunks)")
             
-            # Generate embeddings with retry logic
-            embeddings = self._generate_batch_with_retry(batch_texts)
-            
-            # Attach embeddings to chunks
-            for chunk, embedding in zip(batch, embeddings):
-                # Add embedding to the chunk's metadata
-                if not hasattr(chunk, 'metadata'):
-                    chunk.metadata = {}
+            try:
+                # Generate embeddings with retry logic
+                embeddings = self._generate_batch_with_retry(batch_texts)
                 
-                chunk.metadata['embedding'] = embedding
-                chunk.metadata['embedding_model'] = self.model_name
-                chunk.metadata['embedding_dimension'] = self.dimension
-                processed_chunks.append(chunk)
+                # Attach embeddings to chunks
+                for idx, embedding in zip(valid_indices, embeddings):
+                    chunk = batch[idx]
+                    if not hasattr(chunk, 'metadata') or chunk.metadata is None:
+                        chunk.metadata = {}
+                    
+                    chunk.metadata['embedding'] = embedding
+                    chunk.metadata['embedding_model'] = self.model_name
+                    chunk.metadata['embedding_dimension'] = self.dimension
+                    processed_chunks.append(chunk)
+            except Exception as e:
+                logger.error(f"Error processing batch {i//self.batch_size + 1}: {str(e)}")
+                # Add these chunks without embeddings
+                for idx in valid_indices:
+                    processed_chunks.append(batch[idx])
         
-        logger.info(f"Successfully generated embeddings for {len(processed_chunks)} chunks")
+        chunks_with_embeddings = sum(1 for chunk in processed_chunks if chunk.metadata and 'embedding' in chunk.metadata)
+        logger.info(f"Generated embeddings for {chunks_with_embeddings}/{total_chunks} chunks")
+        if skipped_chunks > 0:
+            logger.warning(f"Skipped {skipped_chunks} chunks due to size limitations")
+        
         return processed_chunks
     
     def _generate_batch_with_retry(self, texts: List[str]) -> List[List[float]]:
@@ -125,12 +176,10 @@ class EmbeddingGenerator:
         retry_count = 0
         while retry_count <= self.max_retries:
             try:
-                print("CREATING EMBEDDINGS")
                 response = self.client.embeddings.create(
                     model=self.model_name,
                     input=texts
                 )
-                print(response.data, "\n")
                 # Extract embeddings in the same order as input texts
                 embeddings = [data.embedding for data in response.data]
                 return embeddings
@@ -211,6 +260,58 @@ class EmbeddingGenerator:
         
         return formatted_text
     
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        Estimate the number of tokens in a text (rough approximation).
+        
+        Args:
+            text: Text to estimate tokens for
+            
+        Returns:
+            Estimated token count
+        """
+        # A very rough approximation: 1 token ≈ 4 characters for English text
+        # This will overestimate for code which is good for our safety margin
+        return len(text) // 3
+    
+    def _truncate_text(self, text: str, max_tokens: int) -> str:
+        """
+        Truncate text to fit within the token limit while preserving metadata.
+        
+        Args:
+            text: Text to truncate
+            max_tokens: Maximum number of tokens allowed
+            
+        Returns:
+            Truncated text
+        """
+        # Split into metadata and code sections
+        parts = text.split("CODE:\n", 1)
+        if len(parts) != 2:
+            # If we can't split properly, just truncate from the end
+            return text[:max_tokens*3]
+        
+        metadata, code = parts
+        
+        # Estimate tokens in metadata
+        metadata_tokens = self._estimate_tokens(metadata)
+        
+        # Calculate how many tokens we have left for code
+        remaining_tokens = max_tokens - metadata_tokens - 10  # 10 token buffer
+        
+        if remaining_tokens <= 0:
+            # Even metadata is too long, truncate it
+            return text[:max_tokens*3]
+        
+        # Truncate code based on remaining tokens
+        max_code_chars = remaining_tokens * 3
+        
+        if len(code) > max_code_chars:
+            truncated_code = code[:max_code_chars] 
+            return metadata + "CODE:\n" + truncated_code + "\n[TRUNCATED due to size]"
+        
+        return text
+    
     def embed_text(self, text: str) -> List[float]:
         """
         Generate embedding for a single text string.
@@ -223,6 +324,12 @@ class EmbeddingGenerator:
         Returns:
             Embedding vector as a list of floats
         """
+        # Estimate tokens and truncate if needed
+        est_tokens = self._estimate_tokens(text)
+        if est_tokens > self.max_tokens:
+            logger.warning(f"Text too large (~{est_tokens} tokens), truncating to fit {self.max_tokens} token limit")
+            text = text[:self.max_tokens*3]  # Simple truncation for queries
+        
         try:
             response = self.client.embeddings.create(
                 model=self.model_name,
