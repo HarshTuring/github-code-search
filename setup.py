@@ -23,8 +23,9 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "fetch-repo=fetcher.cli:main",
-            "parse-repo=parser.cli:main",
+            "github-analyzer=src.main:main",
+            "fetch-repo=src.fetcher.cli:main",
+            "parse-repo=src.parser.cli:main",
         ]
     },
     author="Harsh Master",
