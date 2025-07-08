@@ -346,7 +346,7 @@ class JavaScriptParser(BaseParser):
         for match in re.finditer(method_pattern, range_content):
             method_name = match.group(1)
             # Skip constructor
-            if method_name != 'constructor' and not method_name.startsWith('_'):
+            if method_name != 'constructor' and not method_name.startswith('_'):
                 methods.append(method_name)
         
         # Also look for lifecycle methods

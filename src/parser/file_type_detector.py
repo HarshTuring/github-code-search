@@ -125,22 +125,44 @@ class FileTypeDetector:
     
     @classmethod
     def _is_binary(cls, file_path: Path) -> bool:
-        """Check if a file is binary."""
-        # Quick check based on extension
+        """Check if a file is binary, with special handling for JS/TS files."""
+        # JavaScript/TypeScript files are always text files
+        js_extensions = {'.js', '.jsx', '.ts', '.tsx', '.json'}
+        if file_path.suffix.lower() in js_extensions:
+            return False
+            
+        # Quick check based on extension for known binary types
         if file_path.suffix.lower() in cls.BINARY_EXTENSIONS:
             return True
-            
+                
         # Use python-magic if available
         if MAGIC_AVAILABLE:
             try:
                 mime = magic.from_file(str(file_path), mime=True)
-                return not mime.startswith('text/')
+                # Consider all text/* MIME types as non-binary
+                if mime.startswith('text/'):
+                    return False
+                # Special case for JavaScript and JSON
+                if mime in ('application/javascript', 'application/json'):
+                    return False
+                # If we get here with a MIME type, it's likely binary
+                if mime != 'application/octet-stream':  # Sometimes magic returns this for text
+                    return True
             except Exception as e:
                 print(f"Warning: magic library failed for {file_path}: {e}")
-                # Fall back to extension check
-                pass
+                # Fall through to fallback
+                    
+        # Fallback method for text detection
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # Try to read a chunk as text
+                chunk = f.read(1024)
+                return False  # If we got here, it's readable as text
+        except UnicodeDecodeError:
+            # If we can't decode as UTF-8, it's likely binary
+            return True
                 
-        # Fallback method if python-magic is not available or fails
+        # Final fallback: check for null bytes
         try:
             with open(file_path, 'rb') as f:
                 chunk = f.read(1024)

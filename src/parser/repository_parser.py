@@ -36,28 +36,78 @@ class RepositoryParser:
         self._discover_files()
         return self.repo_structure
         
-    def create_chunks(self) -> List[Chunk]:
+    def create_chunks(self, verbose=False) -> List[Chunk]:
         """Create code chunks from the repository."""
         if not self.repo_structure.files:
             self.parse()
             
         chunks = []
         
+        # Debug stats
+        total_files = len(self.repo_structure.files)
+        processed_files = 0
+        binary_files = 0
+        unsupported_files = 0
+        
         # Process each file based on its type
         for file_path, file_info in self.repo_structure.files.items():
+            if verbose:
+                print(f"Processing file: {file_path}, Language: {file_info.language}, Binary: {file_info.is_binary}")
+                
             if file_info.is_binary:
-                continue  # Skip binary files
+                binary_files += 1
+                if verbose:
+                    print(f"  Skipping binary file: {file_path}")
+                continue
                 
             if not file_info.language:
-                continue  # Skip files with unknown language
+                unsupported_files += 1
+                if verbose:
+                    print(f"  Skipping unsupported file: {file_path}")
+                continue
                 
             # Get the appropriate parser
             parser = self.parsers.get(file_info.language)
             if parser:
                 # Create chunks using the language parser
-                file_chunks = parser.create_chunks(file_info)
-                chunks.extend(file_chunks)
-                
+                try:
+                    file_chunks = parser.create_chunks(file_info)
+                    if file_chunks:
+                        chunks.extend(file_chunks)
+                        processed_files += 1
+                        if verbose:
+                            print(f"  Created {len(file_chunks)} chunks for {file_path}")
+                    else:
+                        if verbose:
+                            print(f"  No chunks created for {file_path}")
+                except Exception as e:
+                    print(f"Error creating chunks for {file_path}: {e}")
+            else:
+                unsupported_files += 1
+                if verbose:
+                    print(f"  No parser available for language: {file_info.language}")
+        
+        # Print summary statistics
+        print(f"\nRepository Processing Summary:")
+        print(f"  Total files: {total_files}")
+        print(f"  Processed files: {processed_files}")
+        print(f"  Binary files skipped: {binary_files}")
+        print(f"  Unsupported files skipped: {unsupported_files}")
+        print(f"  Total chunks created: {len(chunks)}")
+        
+        # Print language-specific stats if verbose
+        if verbose:
+            lang_stats = {}
+            for chunk in chunks:
+                lang = chunk.language
+                if lang not in lang_stats:
+                    lang_stats[lang] = 0
+                lang_stats[lang] += 1
+            
+            print("\nChunks by language:")
+            for lang, count in lang_stats.items():
+                print(f"  {lang}: {count} chunks")
+        
         return chunks
     
     def _discover_files(self) -> None:

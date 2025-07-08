@@ -9,6 +9,8 @@ def main():
     parser = argparse.ArgumentParser(description="Parse a repository into code chunks")
     parser.add_argument("repo_path", help="Path to the repository")
     parser.add_argument("--output", "-o", help="Output directory for chunks")
+    parser.add_argument("--verbose", "-v", action="store_true", 
+                      help="Enable verbose output for debugging")
     
     args = parser.parse_args()
     
@@ -21,8 +23,25 @@ def main():
         print(f"Found {repo_structure.file_count} files in repository")
         
         # Create chunks
-        chunks = repo_parser.create_chunks()
+        chunks = repo_parser.create_chunks(verbose=args.verbose)
         print(f"Created {len(chunks)} code chunks")
+        
+        # Display JavaScript/React specific stats
+        js_chunks = [c for c in chunks if c.language in ('javascript', 'typescript', 'jsx')]
+        if js_chunks:
+            print(f"\nJavaScript/TypeScript Stats:")
+            print(f"  Total JS/TS chunks: {len(js_chunks)}")
+            
+            # Count by chunk type
+            type_counts = {}
+            for chunk in js_chunks:
+                chunk_type = chunk.chunk_type
+                if chunk_type not in type_counts:
+                    type_counts[chunk_type] = 0
+                type_counts[chunk_type] += 1
+            
+            for chunk_type, count in type_counts.items():
+                print(f"  {chunk_type}: {count} chunks")
         
         # Save chunks if output directory specified
         if args.output:
@@ -35,7 +54,9 @@ def main():
                 with open(chunk_file, 'w', encoding='utf-8') as f:
                     f.write(f"# {chunk.name} ({chunk.chunk_type})\n")
                     f.write(f"# File: {chunk.file_path}\n")
-                    f.write(f"# Lines: {chunk.start_line}-{chunk.end_line}\n\n")
+                    if chunk.start_line and chunk.end_line:
+                        f.write(f"# Lines: {chunk.start_line}-{chunk.end_line}\n")
+                    f.write("\n")
                     f.write(chunk.content)
                     
             # Save metadata
@@ -55,6 +76,8 @@ def main():
         return 0
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return 1
 
 if __name__ == "__main__":
