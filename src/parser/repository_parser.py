@@ -7,6 +7,8 @@ from .models.chunk import Chunk
 from .file_type_detector import FileTypeDetector
 from .language_parsers.python_parser import PythonParser
 from .language_parsers.base_parser import BaseParser
+from .language_parsers.javascript_parser import JavaScriptParser
+
 
 class RepositoryParser:
     """Parses a repository and creates chunks of code."""
@@ -22,6 +24,9 @@ class RepositoryParser:
         # Initialize parsers
         self.parsers: Dict[str, BaseParser] = {
             "python": PythonParser(),
+            "javascript": JavaScriptParser(),
+            "typescript": JavaScriptParser(),
+            "jsx": JavaScriptParser(),
             # Add other language parsers here
         }
         
