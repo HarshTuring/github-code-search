@@ -11,6 +11,8 @@ from parser import RepositoryParser
 from parser.models.chunk import Chunk
 
 from embeddings import EmbeddingGenerator
+from embeddings import VectorStore, VectorStoreManager
+
 
 # Set up logging
 logging.basicConfig(
@@ -29,7 +31,8 @@ class GitHubCodeAnalyzer:
     
     def __init__(self, base_repos_path: str = "./data/repos", 
                  output_path: str = "./data/parsed",
-                 size_limit_mb: int = 100):
+                 size_limit_mb: int = 100,
+                 embeddings_path: str = "./data/embeddings"):
         """
         Initialize the GitHub Code Analyzer.
         
@@ -37,27 +40,80 @@ class GitHubCodeAnalyzer:
             base_repos_path: Directory to store downloaded repositories
             output_path: Directory to store parsed chunks
             size_limit_mb: Size limit for repositories in MB
+            embeddings_path: Directory to store embeddings
         """
         self.base_repos_path = Path(base_repos_path)
         self.output_path = Path(output_path)
         self.size_limit_mb = size_limit_mb
+        self.embeddings_path = Path(embeddings_path)
         
         # Ensure directories exist
         self.base_repos_path.mkdir(parents=True, exist_ok=True)
         self.output_path.mkdir(parents=True, exist_ok=True)
-        
+        self.embeddings_path.mkdir(parents=True, exist_ok=True)
+
         # Initialize components
         self.fetcher = RepositoryFetcher(str(self.base_repos_path), size_limit_mb)
+        self.vector_store_manager = VectorStoreManager(base_dir=str(self.embeddings_path))
         self.current_repo_path: Optional[Path] = None
         self.current_parser: Optional[RepositoryParser] = None
         self.current_chunks: List[Chunk] = []
+
+    def store_embeddings(self, chunks: List[Chunk], repo_name: str) -> Dict[str, Any]:
+        """
+        Store embeddings for code chunks in a vector database.
+        
+        Args:
+            chunks: List of code chunks with embeddings
+            repo_name: Repository name for organizing storage
+            
+        Returns:
+            Dictionary with storage statistics
+        """
+        chunks_with_embeddings = [c for c in chunks if c.metadata and 'embedding' in c.metadata]
+        
+        if not chunks_with_embeddings:
+            logger.warning(f"No embeddings to store for {repo_name}")
+            return {
+                "success": False,
+                "error": "No chunks with embeddings found",
+                "repo_name": repo_name
+            }
+        
+        try:
+            # Get vector store for this repository
+            vector_store = self.vector_store_manager.get_store(repo_name)
+            
+            # Add chunks to the vector store
+            chunk_ids = vector_store.add_chunks(chunks_with_embeddings)
+            
+            # Get statistics
+            stats = vector_store.get_stats()
+            
+            logger.info(f"Stored {len(chunk_ids)} embeddings in vector database for {repo_name}")
+            
+            return {
+                "success": True,
+                "chunks_stored": len(chunk_ids),
+                "total_chunks": stats["chunk_count"],
+                "repo_name": repo_name,
+                "store_path": stats["path"]
+            }
+        except Exception as e:
+            logger.error(f"Error storing embeddings for {repo_name}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "repo_name": repo_name
+            }
         
     def analyze_github_repo(self, github_url: str, force_download: bool = False, 
                            verbose: bool = False, generate_embeddings: bool = False,
                            embedding_model: str = "text-embedding-3-large",
                            api_key: Optional[str] = None,
                            cache_embeddings: bool = True,
-                           cache_dir: Optional[str] = None) -> Dict[str, Any]:
+                           cache_dir: Optional[str] = None,
+                           store_embeddings: bool = True) -> Dict[str, Any]:
         """
         Analyze a GitHub repository - download, parse, and chunk it.
         
@@ -70,6 +126,7 @@ class GitHubCodeAnalyzer:
             api_key: OpenAI API key (if None, will use environment variable)
             cache_embeddings: Whether to use caching for embeddings
             cache_dir: Directory for the embedding cache (None for default)
+            store_embeddings: Whether to store embeddings in a vector database
             
         Returns:
             Dict with analysis results and statistics
@@ -104,6 +161,8 @@ class GitHubCodeAnalyzer:
         except Exception as e:
             logger.error(f"Failed to generate code chunks: {e}")
             return {'success': False, 'error': f'Chunking failed: {str(e)}'}
+        
+        repo_name = self._get_repo_name_from_url(github_url)
 
         embedding_info = {'generated': False}
         if generate_embeddings and self.current_chunks:
@@ -143,6 +202,12 @@ class GitHubCodeAnalyzer:
                 }
                 
                 logger.info(f"Successfully generated {embedding_count} embeddings")
+                
+                # Store embeddings in vector database if requested
+                if store_embeddings and embedding_count > 0:
+                    storage_result = self.store_embeddings(self.current_chunks, repo_name)
+                    embedding_info['storage'] = storage_result
+                    
             except Exception as e:
                 logger.error(f"Failed to generate embeddings: {e}")
                 embedding_info = {
@@ -164,16 +229,43 @@ class GitHubCodeAnalyzer:
         
         # Add embedding info to the result
         result = {
-            'success': True,
-            'repository': github_url,
-            'download_path': str(self.current_repo_path),
-            'output_path': str(output_dir),
-            'statistics': stats,
-            'embeddings': embedding_info
+        'success': True,
+        'repository': github_url,
+        'name': repo_name,
+        'download_path': str(self.current_repo_path),
+        'output_path': str(output_dir),
+        'statistics': stats,
+        'embeddings': embedding_info
         }
         
         return result
     
+    def _get_repo_name_from_url(self, github_url: str) -> str:
+        """
+        Extract a repository name from a GitHub URL for use as a collection name.
+        
+        Args:
+            github_url: GitHub repository URL
+            
+        Returns:
+            Repository name in format "username_reponame"
+        """
+        # Clean the URL
+        clean_url = github_url.rstrip('/')
+        if clean_url.endswith('.git'):
+            clean_url = clean_url[:-4]
+        
+        # Extract username and repo name
+        parts = clean_url.split('/')
+        if len(parts) >= 2:
+            username = parts[-2]
+            repo_name = parts[-1]
+            return f"{username}_{repo_name}"
+        
+        # Fallback: use a hash of the URL
+        import hashlib
+        return hashlib.md5(github_url.encode()).hexdigest()
+        
     def save_chunks(self, output_dir: Optional[Path] = None) -> Path:
         """
         Save the current chunks to files.
@@ -372,6 +464,10 @@ def main():
 
     Generate embeddings with specific model and disable caching:
         python -m src.main https://github.com/username/repo-name --embeddings --embedding-model text-embedding-3-large --no-cache
+    
+    Generate embeddings and store in vector database:
+        python -m src.main https://github.com/username/repo-name --embeddings --store
+  
             """
     )
     
@@ -385,6 +481,11 @@ def main():
         "--output", "-o", 
         default="./data/parsed",
         help="Directory to store analysis results"
+    )
+    parser.add_argument(
+        "--embeddings-dir", 
+        default="./data/embeddings",
+        help="Directory to store embeddings"
     )
     parser.add_argument(
         "--force", "-f", 
@@ -422,7 +523,16 @@ def main():
         "--cache-dir",
         help="Specify a custom directory for the embedding cache"
     )
-    
+    parser.add_argument(
+        "--store",
+        action="store_true",
+        help="Store embeddings in vector database"
+    ) 
+    parser.add_argument(
+        "--no-store",
+        action="store_true",
+        help="Disable vector storage even when generating embeddings"
+    )   
     args = parser.parse_args()
     
     # Set log level based on verbose flag
@@ -434,7 +544,8 @@ def main():
         analyzer = GitHubCodeAnalyzer(
             base_repos_path=args.repos_dir,
             output_path=args.output,
-            size_limit_mb=args.size_limit
+            size_limit_mb=args.size_limit,
+            embeddings_path=args.embeddings_dir
         )
         # Run analysis
         result = analyzer.analyze_github_repo(
@@ -445,7 +556,9 @@ def main():
             embedding_model=args.embedding_model,
             api_key="",
             cache_embeddings=not args.no_cache,
-            cache_dir=args.cache_dir
+            cache_dir=args.cache_dir,
+            store_embeddings=args.store and not args.no_store
+
         )
         
         if result['success']:
@@ -476,6 +589,17 @@ def main():
                 logger.info(f"    Cache misses: {cache_stats['misses']}")
                 logger.info(f"    Cache hit rate: {cache_stats['hit_rate']:.1%}")
     
+            if args.store and result['success'] and 'embeddings' in result:
+                embedding_info = result['embeddings']
+                if embedding_info.get('generated') and 'storage' in embedding_info:
+                    storage_info = embedding_info['storage']
+                    if storage_info['success']:
+                        logger.info("\n  Vector Storage:")
+                        logger.info(f"    Chunks stored: {storage_info['chunks_stored']}")
+                        logger.info(f"    Total chunks in store: {storage_info['total_chunks']}")
+                        logger.info(f"    Store path: {storage_info['store_path']}")
+                    else:
+                        logger.warning(f"\n  Vector storage failed: {storage_info.get('error', 'Unknown error')}")
             
             # Print embedding info if available
             if 'embeddings' in stats:
