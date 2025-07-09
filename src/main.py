@@ -55,7 +55,9 @@ class GitHubCodeAnalyzer:
     def analyze_github_repo(self, github_url: str, force_download: bool = False, 
                            verbose: bool = False, generate_embeddings: bool = False,
                            embedding_model: str = "text-embedding-3-large",
-                           api_key: Optional[str] = None) -> Dict[str, Any]:
+                           api_key: Optional[str] = None,
+                           cache_embeddings: bool = True,
+                           cache_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         Analyze a GitHub repository - download, parse, and chunk it.
         
@@ -66,6 +68,8 @@ class GitHubCodeAnalyzer:
             generate_embeddings: Whether to generate embeddings for chunks
             embedding_model: Model to use for generating embeddings
             api_key: OpenAI API key (if None, will use environment variable)
+            cache_embeddings: Whether to use caching for embeddings
+            cache_dir: Directory for the embedding cache (None for default)
             
         Returns:
             Dict with analysis results and statistics
@@ -105,10 +109,18 @@ class GitHubCodeAnalyzer:
         if generate_embeddings and self.current_chunks:
             try:
                 logger.info(f"Generating embeddings for {len(self.current_chunks)} chunks using {embedding_model}")
+                
+                # Set cache directory if not specified
+                if cache_dir is None and cache_embeddings:
+                    cache_dir = str(self.output_path / "embedding_cache")
+                    
                 embedding_generator = EmbeddingGenerator(
                     model_name=embedding_model,
-                    api_key=api_key
+                    api_key=api_key,
+                    use_cache=cache_embeddings,
+                    cache_dir=cache_dir
                 )
+                
                 self.current_chunks = embedding_generator.generate_embeddings(
                     self.current_chunks,
                     show_progress=verbose
@@ -117,11 +129,17 @@ class GitHubCodeAnalyzer:
                 embedding_count = sum(1 for chunk in self.current_chunks 
                                     if chunk.metadata and 'embedding' in chunk.metadata)
                 
+                # Get cache statistics if available
+                cache_stats = {}
+                if cache_embeddings and embedding_generator.cache:
+                    cache_stats = embedding_generator.cache.get_stats()
+                
                 embedding_info = {
                     'generated': True,
                     'model': embedding_model,
                     'dimension': embedding_generator.dimension,
-                    'count': embedding_count
+                    'count': embedding_count,
+                    'cache': cache_stats if cache_stats else {'enabled': cache_embeddings}
                 }
                 
                 logger.info(f"Successfully generated {embedding_count} embeddings")
@@ -351,6 +369,9 @@ def main():
         
     Specify output directory:
         python -m src.main https://github.com/username/repo-name --output ./my_analysis
+
+    Generate embeddings with specific model and disable caching:
+        python -m src.main https://github.com/username/repo-name --embeddings --embedding-model text-embedding-3-large --no-cache
             """
     )
     
@@ -392,6 +413,15 @@ def main():
         default="text-embedding-3-small",
         help="OpenAI model to use for embeddings"
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable embedding cache"
+    )
+    parser.add_argument(
+        "--cache-dir",
+        help="Specify a custom directory for the embedding cache"
+    )
     
     args = parser.parse_args()
     
@@ -413,7 +443,9 @@ def main():
             verbose=args.verbose,
             generate_embeddings=args.embeddings,
             embedding_model=args.embedding_model,
-            api_key=""
+            api_key="",
+            cache_embeddings=not args.no_cache,
+            cache_dir=args.cache_dir
         )
         
         if result['success']:
@@ -434,6 +466,16 @@ def main():
             logger.info("\n  Chunks by type:")
             for chunk_type, count in stats['by_type'].items():
                 logger.info(f"    {chunk_type}: {count}")
+
+            result_embedding_info = result['embeddings']
+
+            if 'cache' in result_embedding_info and isinstance(result_embedding_info['cache'], dict) and 'hit_rate' in result_embedding_info['cache']:
+                cache_stats = result_embedding_info['cache']
+                logger.info(f"    Cache: {cache_stats['entries']} entries")
+                logger.info(f"    Cache hits: {cache_stats['hits']}")
+                logger.info(f"    Cache misses: {cache_stats['misses']}")
+                logger.info(f"    Cache hit rate: {cache_stats['hit_rate']:.1%}")
+    
             
             # Print embedding info if available
             if 'embeddings' in stats:
