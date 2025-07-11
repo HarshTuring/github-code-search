@@ -298,18 +298,35 @@ class GitHubCodeAnalyzer:
                 query_data=query_data,
                 top_k=top_k
             )
-            
+
+            # Print retrieved chunks for debugging
+            print("\n--- Retrieved Chunks (Primary) ---")
+            for i, chunk in enumerate(retrieved_results.get("primary_results", [])):
+                print(f"[{i+1}] ID: {chunk.get('id')}")
+                print(f"    File: {chunk.get('metadata', {}).get('file_path')}")
+                print(f"    Type: {chunk.get('metadata', {}).get('chunk_type')}")
+                print(f"    Language: {chunk.get('metadata', {}).get('language')}")
+                print(f"    Similarity: {chunk.get('similarity')}")
+                print(f"    Content (truncated): {chunk.get('content', '')[:200]}\n")
+            print("--- Retrieved Chunks (Context) ---")
+            for i, chunk in enumerate(retrieved_results.get("context_chunks", [])):
+                print(f"[{i+1}] ID: {chunk.get('id')}")
+                print(f"    File: {chunk.get('metadata', {}).get('file_path')}")
+                print(f"    Type: {chunk.get('metadata', {}).get('chunk_type')}")
+                print(f"    Language: {chunk.get('metadata', {}).get('language')}")
+                print(f"    Content (truncated): {chunk.get('content', '')[:200]}\n")
+
             # Generate response
             logger.info("Generating response")
             response_data = response_generator.generate_response(
                 query=query_text,
                 retrieved_results=retrieved_results
             )
-            
+
             # Add query success info and return
             response_data["success"] = True
             response_data["repository"] = repo_name
-            
+
             return response_data
             
         except Exception as e:

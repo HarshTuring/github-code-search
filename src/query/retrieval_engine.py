@@ -21,7 +21,7 @@ class RetrievalEngine:
     def retrieve(self, 
                 query_data: Dict[str, Any], 
                 top_k: Optional[int] = None, 
-                threshold: float = 0.7) -> List[Dict[str, Any]]:
+                threshold: float = 0.2) -> List[Dict[str, Any]]:
         """
         Retrieve the most relevant code chunks for a query.
         
@@ -33,12 +33,22 @@ class RetrievalEngine:
         Returns:
             List of relevant code chunks with similarity scores
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         embedding = query_data.get("embedding")
         if not embedding:
             raise ValueError("Query data is missing embedding")
         
+        # Log the query text and embedding shape for debugging
+        query_text = query_data.get("query_text", "[no query text]")
+        logger.debug(f"Processing query: {query_text}")
+        logger.debug(f"Embedding shape: {len(embedding) if embedding else 0} dimensions")
+        
         # Apply filters from query
         filters = query_data.get("filters", {})
+        if filters:
+            logger.debug(f"Applying filters: {filters}")
         
         # Set the number of results to retrieve
         k = top_k if top_k is not None else self.default_top_k
@@ -66,11 +76,12 @@ class RetrievalEngine:
         # Convert filters to ChromaDB format
         chroma_filters = self._format_filters(filters)
         
-        # Perform the search
+        # Perform the search and include all metadata fields
         results = self.vector_store.collection.query(
             query_embeddings=[embedding],
             n_results=k,
-            where=chroma_filters if chroma_filters else None
+            where=chroma_filters if chroma_filters else None,
+            include=["metadatas", "documents", "distances", "embeddings"]
         )
         
         return results
@@ -123,32 +134,60 @@ class RetrievalEngine:
         Returns:
             Processed and filtered results
         """
-        if not results or "ids" not in results:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"Processing results with threshold: {threshold}")
+        
+        if not results:
+            logger.debug("No results returned from ChromaDB")
+            return []
+            
+        if "ids" not in results:
+            logger.debug(f"Unexpected results format: {results.keys()}")
             return []
         
         processed_results = []
         
         # ChromaDB returns results for one query at index 0
-        ids = results["ids"][0]
-        distances = results["distances"][0]
-        metadatas = results["metadatas"][0]
-        documents = results.get("documents", [[]])[0]
+        try:
+            ids = results["ids"][0]
+            distances = results["distances"][0]
+            metadatas = results["metadatas"][0]
+            documents = results.get("documents", [[]])[0]
+            
+            logger.debug(f"Found {len(ids)} results from ChromaDB")
+            
+        except (KeyError, IndexError) as e:
+            logger.error(f"Error processing ChromaDB results: {e}")
+            logger.debug(f"Results structure: {results.keys()}")
+            if "metadatas" in results and results["metadatas"]:
+                logger.debug(f"Metadatas structure: {[type(m) for m in results['metadatas']]}")
+            return []
         
         # Convert distance to similarity score (ChromaDB returns distances, not similarities)
-        similarities = [1.0 - dist for dist in distances]
+        similarities = [1.0 / (1.0 + dist) for dist in distances]  # Using inverse of (1 + distance) for better similarity
+        
+        # Log the similarity scores for debugging
+        logger.debug(f"Similarity scores: {similarities}")
         
         # Combine results with their similarity scores
         for i in range(len(ids)):
+            # Log each result's similarity score and threshold comparison
+            logger.debug(f"Result {i}: similarity={similarities[i]:.4f}, threshold={threshold}")
+            
             # Skip results below threshold
             if similarities[i] < threshold:
+                logger.debug(f"Skipping result {i} (similarity {similarities[i]:.4f} < {threshold})")
                 continue
                 
             result = {
                 "id": ids[i],
                 "similarity": similarities[i],
                 "metadata": metadatas[i],
-                "content": documents[i] if documents else None
+                "content": documents[i] if documents and i < len(documents) else "[No content]"
             }
+            logger.debug(f"Including result {i} with metadata: {metadatas[i].get('path', 'unknown')}")
             
             processed_results.append(result)
         

@@ -58,20 +58,38 @@ class ResponseGenerator:
  
         # First pass: Determine relevant chunks and their importance to the query
         relevance_map = self._first_pass_analysis(query, all_chunks)
- 
+        
+        # Ensure we have a valid relevance map
+        if not relevance_map or not isinstance(relevance_map, dict):
+            relevance_map = {
+                "chunk_relevance": [{"chunk_id": chunk["id"], "relevance_score": 5} for chunk in all_chunks],
+                "analysis": "Using default relevance scoring for chunks."
+            }
+        
+        # Ensure we have chunk_relevance
+        if not isinstance(relevance_map.get("chunk_relevance"), list):
+            relevance_map["chunk_relevance"] = [{"chunk_id": chunk["id"], "relevance_score": 5} for chunk in all_chunks]
+        
         # Sort chunks by relevance score
         relevant_chunks = sorted(
             relevance_map["chunk_relevance"],
-            key=lambda x: x["relevance_score"],
+            key=lambda x: x.get("relevance_score", 0),
             reverse=True
         )
- 
+        
         # Get the most relevant chunks for the second pass
-        top_chunks = [chunk for chunk in all_chunks 
-        if chunk["id"] in [rc["chunk_id"] for rc in relevant_chunks[:max_chunks//2]]]
+        top_chunks = []
+        if relevant_chunks:
+            top_chunk_ids = [rc.get("chunk_id") for rc in relevant_chunks[:max_chunks//2] if rc.get("chunk_id") is not None]
+            top_chunks = [chunk for chunk in all_chunks if chunk.get("id") in top_chunk_ids]
+        
+        # If no top chunks, use the first few chunks
+        if not top_chunks and all_chunks:
+            top_chunks = all_chunks[:max_chunks//2]
         
         # Second pass: Generate comprehensive answer with proper citations
-        response = self._second_pass_generation(query, top_chunks, relevance_map["analysis"])
+        analysis = relevance_map.get("analysis", "No analysis available.")
+        response = self._second_pass_generation(query, top_chunks, analysis)
         
         return {
         "response": response["content"],
@@ -127,7 +145,20 @@ class ResponseGenerator:
                 relevance_data["chunk_relevance"] = []
             if not relevance_data.get("analysis"):
                 relevance_data["analysis"] = "Unable to determine chunk relevance."
-                return relevance_data
+            
+            # Make sure we have chunk_relevance for each chunk
+            chunk_ids = [chunk.get("id", str(i)) for i, chunk in enumerate(chunks)]
+            existing_ids = {item.get("chunk_id") for item in relevance_data.get("chunk_relevance", [])}
+            
+            # Add missing chunks with default score
+            for chunk_id in chunk_ids:
+                if chunk_id not in existing_ids:
+                    relevance_data["chunk_relevance"].append({
+                        "chunk_id": chunk_id,
+                        "relevance_score": 5  # Default score
+                    })
+            
+            return relevance_data
         except (json.JSONDecodeError, AttributeError):
             # Fallback if response isn't valid JSON
             return {
