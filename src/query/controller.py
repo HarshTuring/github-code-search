@@ -9,7 +9,7 @@ class QueryController:
     Orchestrates the entire process from query to response.
     """
  
-    def __init__(self, embedding_generator, vector_store, model_name: str = "gpt-4", default_top_k: int = 5):
+    def __init__(self, embedding_generator, vector_store, model_name: str = "gpt-4o-mini", default_top_k: int = 5):
         """
         Initialize the query controller with all required components.
 

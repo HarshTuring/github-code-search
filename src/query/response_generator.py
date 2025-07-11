@@ -9,7 +9,7 @@ class ResponseGenerator:
     Uses a two-pass approach for handling complex queries across multiple code chunks.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4", temperature: float = 0.1):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini", temperature: float = 0.1):
         """
         Initialize the response generator with OpenAI configuration.
 
