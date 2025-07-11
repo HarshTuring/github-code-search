@@ -268,11 +268,11 @@ class EmbeddingGenerator:
         self.max_tokens = int(self.max_tokens * 0.95)
         
         # Set up OpenAI client
-        api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        if not api_key:
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not self.api_key:
             raise ValueError("OpenAI API key must be provided either as an argument or as OPENAI_API_KEY environment variable")
-        
-        self.client = openai.OpenAI(api_key=api_key)
+
+        self.client = openai.OpenAI(api_key=self.api_key)
         
         # Initialize cache if enabled
         self.cache = None
@@ -308,46 +308,56 @@ class EmbeddingGenerator:
         
         # First pass: check cache and prepare batches for API calls
         chunks_needing_embedding = []
-        for chunk in chunks:
-            # Check cache first if enabled
-            cached_embedding = None
-            if self.use_cache and self.cache:
+        total_chunks = len(chunks)
+        if total_chunks == 0:
+            return []
+
+        processed_chunks = []
+        chunks_to_embed = []
+        cached_chunks = 0
+
+        # First, check cache for existing embeddings
+        if self.use_cache and self.cache:
+            for chunk in chunks:
                 cached_embedding = self.cache.get(chunk, self.model_name)
-            
-            if cached_embedding is not None:
-                # Use cached embedding
-                if not hasattr(chunk, 'metadata') or chunk.metadata is None:
-                    chunk.metadata = {}
-                
-                chunk.metadata['embedding'] = cached_embedding
-                chunk.metadata['embedding_model'] = self.model_name
-                chunk.metadata['embedding_dimension'] = self.dimension
-                chunk.metadata['embedding_source'] = 'cache'
-                processed_chunks.append(chunk)
-                cached_chunks += 1
-            else:
-                # Need to generate embedding
-                chunks_needing_embedding.append(chunk)
+                if cached_embedding:
+                    if not hasattr(chunk, 'metadata') or chunk.metadata is None:
+                        chunk.metadata = {}
+                    chunk.metadata['embedding'] = cached_embedding
+                    chunk.metadata['embedding_model'] = self.model_name
+                    chunk.metadata['embedding_dimension'] = self.dimension
+                    chunk.metadata['embedding_source'] = 'cache'
+                    processed_chunks.append(chunk)
+                    cached_chunks += 1
+                else:
+                    chunks_to_embed.append(chunk)
+        else:
+            chunks_to_embed = chunks
+
+        if not chunks_to_embed:
+            logger.info(f"All {total_chunks} embeddings were found in cache.")
+            return processed_chunks
+
+        logger.info(f"Found {cached_chunks} cached embeddings. Generating embeddings for the remaining {len(chunks_to_embed)} chunks.")
         
-        # Process chunks that need new embeddings in batches
-        for i in range(0, len(chunks_needing_embedding), self.batch_size):
-            batch = chunks_needing_embedding[i:i+self.batch_size]
+        skipped_chunks = 0
+        # Process chunks in batches
+        for i in range(0, len(chunks_to_embed), self.batch_size):
+            batch_chunks = chunks_to_embed[i:i+self.batch_size]
             batch_texts = []
             valid_chunks = []
-            
-            # Prepare texts and track which ones are valid
-            for chunk in batch:
+
+            for chunk in batch_chunks:
                 try:
                     text = self._prepare_chunk_text(chunk)
-                    # Estimate tokens and skip if too large
                     est_tokens = self._estimate_tokens(text)
                     if est_tokens > self.max_tokens:
-                        # Try to truncate
                         text = self._truncate_text(text, self.max_tokens)
                         est_tokens = self._estimate_tokens(text)
                         if est_tokens > self.max_tokens:
                             logger.warning(f"Skipping chunk {chunk.id} ({chunk.chunk_type}) - too large even after truncation: ~{est_tokens} tokens")
                             skipped_chunks += 1
+                            processed_chunks.append(chunk)
                             continue
                     
                     batch_texts.append(text)
@@ -355,56 +365,50 @@ class EmbeddingGenerator:
                 except Exception as e:
                     logger.error(f"Error preparing chunk {chunk.id}: {str(e)}")
                     skipped_chunks += 1
+                    processed_chunks.append(chunk)
                     continue
             
-            if not batch_texts:
-                # Skip this batch if all chunks were filtered out
+            if not valid_chunks:
                 continue
-            
+
             if show_progress:
                 current_batch = i // self.batch_size + 1
-                total_batches = (len(chunks_needing_embedding) + self.batch_size - 1) // self.batch_size
-                logger.info(f"Processing batch {current_batch}/{total_batches} ({len(batch_texts)}/{len(batch)} chunks)")
-            
-            try:
-                # Generate embeddings with retry logic
-                embeddings = self._generate_batch_with_retry(batch_texts)
-                
-                # Attach embeddings to chunks
-                for chunk, embedding in zip(valid_chunks, embeddings):
+                total_batches = (len(chunks_to_embed) + self.batch_size - 1) // self.batch_size
+                logger.info(f"Processing batch {current_batch}/{total_batches} ({len(valid_chunks)}/{len(batch_chunks)} chunks)")
+
+            response = self._generate_batch_with_retry(batch_texts)
+
+            if response and len(response.data) == len(valid_chunks):
+                for i, chunk in enumerate(valid_chunks):
+                    embedding_data = response.data[i]
                     if not hasattr(chunk, 'metadata') or chunk.metadata is None:
                         chunk.metadata = {}
-                    
-                    chunk.metadata['embedding'] = embedding
+                    chunk.metadata['embedding'] = embedding_data.embedding
                     chunk.metadata['embedding_model'] = self.model_name
                     chunk.metadata['embedding_dimension'] = self.dimension
                     chunk.metadata['embedding_source'] = 'api'
                     processed_chunks.append(chunk)
-                    
-                    # Add to cache if enabled
+
                     if self.use_cache and self.cache:
-                        self.cache.set(chunk, self.model_name, embedding, self.dimension)
-                
-            except Exception as e:
-                logger.error(f"Error processing batch {i//self.batch_size + 1}: {str(e)}")
-                # Add these chunks without embeddings
+                        self.cache.set(chunk, self.model_name, embedding_data.embedding, self.dimension)
+            else:
+                logger.error(f"Failed to generate embeddings for batch starting with chunk {valid_chunks[0].id}. Skipping batch.")
                 for chunk in valid_chunks:
                     processed_chunks.append(chunk)
-        
-        # Save cache to disk
+
         if self.use_cache and self.cache:
             self.cache.save()
             cache_stats = self.cache.get_stats()
             logger.info(f"Cache statistics: {cache_stats['entries']} entries, {cache_stats['hits']} hits, {cache_stats['misses']} misses, {cache_stats['hit_rate']:.1%} hit rate")
-        
+
         chunks_with_embeddings = sum(1 for chunk in processed_chunks if chunk.metadata and 'embedding' in chunk.metadata)
         logger.info(f"Generated embeddings for {chunks_with_embeddings}/{total_chunks} chunks ({cached_chunks} from cache)")
         if skipped_chunks > 0:
             logger.warning(f"Skipped {skipped_chunks} chunks due to size limitations or errors")
         
         return processed_chunks
-    
-    def _generate_batch_with_retry(self, texts: List[str]) -> List[List[float]]:
+
+    def _generate_batch_with_retry(self, texts: List[str]) -> Optional[openai.types.CreateEmbeddingResponse]:
         """
         Generate embeddings for a batch of texts with retry logic.
         
@@ -412,49 +416,41 @@ class EmbeddingGenerator:
             texts: List of text strings to embed
             
         Returns:
-            List of embedding vectors
+            The embedding response from OpenAI, or None if it fails.
         """
-        retry_count = 0
-        while retry_count <= self.max_retries:
+        retries = self.max_retries
+        while retries > 0:
             try:
                 response = self.client.embeddings.create(
                     model=self.model_name,
                     input=texts
                 )
-                # Extract embeddings in the same order as input texts
-                embeddings = [data.embedding for data in response.data]
-                return embeddings
-                
-            except (openai.RateLimitError, openai.APIConnectionError) as e:
-                retry_count += 1
-                if retry_count > self.max_retries:
-                    logger.error(f"Failed to generate embeddings after {self.max_retries} retries")
-                    raise
-                
-                # Exponential backoff
-                sleep_time = self.retry_delay * (2 ** (retry_count - 1))
-                logger.warning(f"Rate limit or connection error: {str(e)}. Retrying in {sleep_time}s (attempt {retry_count})")
-                time.sleep(sleep_time)
-                
+                return response
+            except openai.RateLimitError as e:
+                logger.warning(f"Rate limit exceeded. Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+                retries -= 1
             except Exception as e:
-                logger.error(f"Error generating embeddings: {str(e)}")
-                raise
-    
+                logger.error(f"Error generating embedding for batch: {str(e)}")
+                return None
+        
+        logger.error("Failed to generate embeddings after multiple retries.")
+        return None
+
     def _prepare_chunk_text(self, chunk: Chunk) -> str:
         """
-        Format chunk content with metadata for more contextual embeddings.
+        Prepare a chunk's text for embedding by adding metadata.
         
         Args:
-            chunk: A code chunk object
-            
+            chunk: Code chunk object
+        
         Returns:
-            Formatted text string combining metadata and code content
+            Formatted text with metadata
         """
-        # Start with chunk type and language as a header
-        formatted_text = f"TYPE: {chunk.chunk_type} | LANGUAGE: {chunk.language or 'unknown'}\n"
+        formatted_text = ""
         
         # Add file path
-        formatted_text += f"PATH: {chunk.file_path}\n"
+        formatted_text += f"FILE: {chunk.file_path}\n"
         
         # Add name
         if chunk.name:

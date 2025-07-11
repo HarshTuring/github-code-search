@@ -1,3 +1,4 @@
 __pycache__
 data
 parsed_chunks
+.env
