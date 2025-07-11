@@ -440,6 +440,29 @@ class EmbeddingGenerator:
                 logger.error(f"Error generating embeddings: {str(e)}")
                 raise
     
+    def generate_for_query(self, text: str) -> Optional[List[float]]:
+        """
+        Generate an embedding for a single text query without caching.
+
+        Args:
+            text: The text to embed.
+
+        Returns:
+            The embedding vector, or None if an error occurs.
+        """
+        if not text:
+            return None
+
+        try:
+            response = openai.Embedding.create(
+                model=self.model_name,
+                input=[text]
+            )
+            return response['data'][0]['embedding']
+        except Exception as e:
+            logger.error(f"Error generating embedding for query: {e}")
+            return None
+
     def _prepare_chunk_text(self, chunk: Chunk) -> str:
         """
         Format chunk content with metadata for more contextual embeddings.

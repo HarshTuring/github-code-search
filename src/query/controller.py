@@ -19,10 +19,10 @@ class QueryController:
         model_name: LLM model for response generation
         default_top_k: Default number of results to retrieve
         """
-    # Initialize components
-    self.query_processor = QueryProcessor(embedding_generator)
-    self.retrieval_engine = RetrievalEngine(vector_store, default_top_k)
-    self.response_generator = ResponseGenerator(model=model_name)
+        # Initialize components
+        self.query_processor = QueryProcessor(embedding_generator)
+        self.retrieval_engine = RetrievalEngine(vector_store, default_top_k)
+        self.response_generator = ResponseGenerator(model=model_name)
 
     def process_query(self, 
     query_text: str,

@@ -270,7 +270,7 @@ class GitHubCodeAnalyzer:
         
         # Initialize components for the query pipeline
         try:
-            # Create embedding generator (reuse the one from analyze_github_repo)
+            # Create embedding generator
             embedding_generator = EmbeddingGenerator(api_key="")
             
             # Initialize query processor
@@ -283,7 +283,7 @@ class GitHubCodeAnalyzer:
             
             # Initialize response generator
             from query.response_generator import ResponseGenerator
-            response_generator = ResponseGenerator(model=model)
+            response_generator = ResponseGenerator(model=model, api_key="")
             
             # Process the query
             logger.info("Processing query and generating embeddings")
@@ -398,7 +398,7 @@ class GitHubCodeAnalyzer:
             List of repository names
         """
         try:
-            return self.vector_store_manager.list_stores()
+            return self.vector_store_manager.list_repositories()
         except Exception as e:
             logger.error(f"Error listing repositories: {e}")
             return []
