@@ -37,8 +37,8 @@ class QueryProcessor:
         formatted_query = self._format_query(query_text, include_history)
         
         # Generate embedding for the query
-        # Generate embedding for the single query string.
-        query_embedding = self.embedding_generator.generate_for_query(formatted_query)
+        # Generate embedding for the query using the correct method for single texts.
+        query_embedding = self.embedding_generator.embed_text(formatted_query)
         
         # Update conversation history
         self._update_history(query_text)

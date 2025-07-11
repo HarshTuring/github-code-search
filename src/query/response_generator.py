@@ -24,7 +24,7 @@ class ResponseGenerator:
 
         self.model = model
         self.temperature = temperature
-        openai.api_key = self.api_key
+        self.client = openai.OpenAI(api_key=self.api_key)
 
         # Templates for different prompt parts
         self.system_template = self._get_system_template()
@@ -300,7 +300,7 @@ class ResponseGenerator:
             params["response_format"] = response_format
         
         try:
-            response = openai.ChatCompletion.create(**params)
+            response = self.client.chat.completions.create(**params)
             return response.choices[0].message.content
         except Exception as e:
             return f"Error generating response: {str(e)}"
