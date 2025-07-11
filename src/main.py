@@ -5,6 +5,7 @@ from pathlib import Path
 import logging
 import json
 from typing import Optional, List, Dict, Any
+from dotenv import load_dotenv
 
 from fetcher import RepositoryFetcher
 from parser import RepositoryParser
@@ -271,7 +272,15 @@ class GitHubCodeAnalyzer:
         # Initialize components for the query pipeline
         try:
             # Create embedding generator
-            embedding_generator = EmbeddingGenerator(api_key="")
+            # Load environment variables from .env file
+            load_dotenv()
+            
+            # Get API key from environment variables
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable or add it to the .env file.")
+                
+            embedding_generator = EmbeddingGenerator(api_key=api_key)
             
             # Initialize query processor
             from query.query_processor import QueryProcessor
@@ -283,7 +292,8 @@ class GitHubCodeAnalyzer:
             
             # Initialize response generator
             from query.response_generator import ResponseGenerator
-            response_generator = ResponseGenerator(model=model, api_key="")
+            
+            response_generator = ResponseGenerator(model=model, api_key=api_key)
             
             # Process the query
             logger.info("Processing query and generating embeddings")
@@ -843,7 +853,7 @@ def main():
                 verbose=args.verbose,
                 generate_embeddings=args.embeddings,
                 embedding_model=args.embedding_model,
-                api_key="",
+                api_key=os.getenv("OPENAI_API_KEY"),
                 cache_embeddings=not args.no_cache,
                 cache_dir=args.cache_dir,
                 store_embeddings=args.store and not args.no_store
