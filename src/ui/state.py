@@ -46,6 +46,8 @@ def navigate_to(page):
         page (str): The page to navigate to.
     """
     st.session_state.current_page = page
+    st.rerun()
+    st.session_state.current_page = page
     
 def set_repo_processing(processing):
     """

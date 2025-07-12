@@ -14,10 +14,16 @@ def render_sidebar():
         if st.button("Home", use_container_width=True):
             navigate_to("home")
             
-        # Only enable chat button if repository is loaded
+        # Check if there are any repositories available
+        from src.embeddings.vector_store import VectorStoreManager
+        vector_store_manager = VectorStoreManager()
+        repositories = vector_store_manager.list_repositories()
+        has_repositories = len(repositories) > 0
+        
+        # Enable chat button if a repo is loaded or if repositories exist
         chat_btn = st.button(
             "Chat with Repository", 
-            disabled=not st.session_state.repo_loaded,
+            disabled=not (st.session_state.repo_loaded or has_repositories),
             use_container_width=True
         )
         if chat_btn:

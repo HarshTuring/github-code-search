@@ -149,8 +149,13 @@ def render_home():
     """
     Render the home page with repository input form.
     """
-    st.title("GitHub Repository Chat")
-    st.write("Analyze and chat with any GitHub repository using natural language.")
+    st.title("GitHub Repository Analyzer")
+    st.write("Enter a GitHub repository URL to analyze its codebase.")
+    
+    # Debug button to show current state
+    if st.button("Debug: Show State"):
+        st.write("### Current Session State")
+        st.json({k: v for k, v in st.session_state.items() if k != 'chat_input_buffer'})
     
     # Repository input form
     with st.form(key="repo_form"):
