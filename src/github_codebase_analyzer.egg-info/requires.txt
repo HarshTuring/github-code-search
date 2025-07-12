@@ -1,0 +1,15 @@
+gitpython>=3.1.0
+requests>=2.25.0
+
+[dev]
+pytest>=6.0.0
+black>=20.8b1
+isort>=5.7.0
+
+[magic]
+
+[magic:platform_system != "Windows"]
+python-magic>=0.4.24
+
+[magic:platform_system == "Windows"]
+python-magic-bin>=0.4.14
