@@ -2,7 +2,7 @@ import streamlit as st
 import os
 from pathlib import Path
 from src.ui.state import navigate_to
-from src.embeddings.vector_store import VectorStore, VectorStoreManager
+from src.embeddings.vector_store import VectorStoreManager
 
 def get_available_repositories():
     """
@@ -12,29 +12,27 @@ def get_available_repositories():
         list: List of repository information dictionaries with name and collection_name
     """
     try:
-        # Initialize VectorStoreManager to handle multiple repositories
+        # Use VectorStoreManager from the correct module
         vector_store_manager = VectorStoreManager()
+        repositories = vector_store_manager.list_repositories()
         
-        # Get list of available repositories
-        collection_names = vector_store_manager.list_repositories()
-        
-        # Format collections into repository information
-        repositories = []
-        for collection_name in collection_names:
-            # Convert collection name back to repository name (replace _ with / if it was a username/repo format)
-            repo_name = collection_name
-            if "_" in collection_name:
+        # Format into a more useful structure if needed
+        formatted_repos = []
+        for repo_name in repositories:
+            # Format the display name (replace underscores with slashes for readability if needed)
+            display_name = repo_name
+            if "_" in repo_name:
                 # This might be a username_repo format, try to make it more readable
-                parts = collection_name.split("_", 1)
+                parts = repo_name.split("_", 1)
                 if len(parts) == 2:
-                    repo_name = f"{parts[0]}/{parts[1]}"
+                    display_name = f"{parts[0]}/{parts[1]}"
             
-            repositories.append({
-                "name": repo_name,
-                "collection_name": collection_name
+            formatted_repos.append({
+                "name": display_name,
+                "collection_name": repo_name
             })
         
-        return repositories
+        return formatted_repos
     except Exception as e:
         st.error(f"Error loading available repositories: {e}")
         return []
@@ -97,7 +95,7 @@ def render_chat():
     Will either show the repository list or the actual chat interface
     depending on the state.
     """
-    # Check if we need to show the repository list or the chat interface
+    # Check if we need to show the repository list or the actual chat interface
     if "selected_repository" not in st.session_state or st.session_state.current_page == "chat":
         render_repository_list()
     else:
