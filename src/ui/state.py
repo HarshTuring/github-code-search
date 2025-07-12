@@ -21,6 +21,9 @@ def initialize_state():
     if "repo_path" not in st.session_state:
         st.session_state.repo_path = ""
     
+    if "selected_repository" not in st.session_state:
+        st.session_state.selected_repository = None
+    
     # Processing state
     if "fetch_complete" not in st.session_state:
         st.session_state.fetch_complete = False
