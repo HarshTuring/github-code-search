@@ -1,0 +1,18 @@
+Metadata-Version: 2.1
+Name: github-codebase-analyzer
+Version: 0.1.0
+Summary: A tool for analyzing GitHub repositories and enabling natural language conversations about them
+Home-page: https://github.com/HarshTuring/github-code-search
+Author: Harsh Master
+Author-email: harshmaster.h@turing.com
+Keywords: github,code,analysis,nlp
+Requires-Python: >=3.7
+Requires-Dist: gitpython>=3.1.0
+Requires-Dist: requests>=2.25.0
+Provides-Extra: magic
+Requires-Dist: python-magic>=0.4.24; platform_system != "Windows" and extra == "magic"
+Requires-Dist: python-magic-bin>=0.4.14; platform_system == "Windows" and extra == "magic"
+Provides-Extra: dev
+Requires-Dist: pytest>=6.0.0; extra == "dev"
+Requires-Dist: black>=20.8b1; extra == "dev"
+Requires-Dist: isort>=5.7.0; extra == "dev"

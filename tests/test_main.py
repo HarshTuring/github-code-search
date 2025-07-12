@@ -2,6 +2,10 @@ import unittest
 from unittest.mock import patch, MagicMock
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add src to path to allow imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -87,6 +91,44 @@ class TestGitHubCodeAnalyzer(unittest.TestCase):
         self.assertTrue(result['embeddings']['generated'])
         self.assertTrue(result['embeddings']['cache']['entries'] > 0)
     
+
+
+
+class TestListReposCommand(unittest.TestCase):
+    @patch('main.GitHubCodeAnalyzer')
+    @patch('builtins.print')
+    @patch('sys.argv', ['main.py', '--list-repos'])
+    def test_list_repos_command(self, mock_print, mock_analyzer):
+        # Arrange
+        mock_analyzer.return_value.list_available_repositories.return_value = [
+            'repo1',
+            'repo2'
+        ]
+        
+        # Act
+        from main import main
+        main()
+        
+        # Assert
+        mock_print.assert_any_call("\nAvailable repositories for querying:")
+        mock_print.assert_any_call("- repo1")
+        mock_print.assert_any_call("- repo2")
+
+    @patch('main.GitHubCodeAnalyzer')
+    @patch('builtins.print')
+    @patch('sys.argv', ['main.py', '--list-repos'])
+    def test_list_repos_empty(self, mock_print, mock_analyzer):
+        # Arrange
+        mock_analyzer.return_value.list_available_repositories.return_value = []
+        
+        # Act
+        from main import main
+        main()
+        
+        # Assert
+        mock_print.assert_any_call("\nAvailable repositories for querying:")
+        mock_print.assert_any_call("No repositories found with stored embeddings.")
+
 
 if __name__ == '__main__':
     unittest.main()

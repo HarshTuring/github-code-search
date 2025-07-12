@@ -1,0 +1,4 @@
+[console_scripts]
+fetch-repo = src.fetcher.cli:main
+github-analyzer = src.main:main
+parse-repo = src.parser.cli:main
