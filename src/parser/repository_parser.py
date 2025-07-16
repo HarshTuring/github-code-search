@@ -26,10 +26,10 @@ class RepositoryParser:
         # Initialize parsers
         self.parsers: Dict[str, BaseParser] = {
             # Maintain existing parsers for backward compatibility
-            # "python": PythonParser(),
-            # "javascript": JavaScriptParser(),
-            # "typescript": JavaScriptParser(),
-            # "jsx": JavaScriptParser(),
+            "python": PythonParser(),
+            "javascript": JavaScriptParser(),
+            "typescript": JavaScriptParser(),
+            "jsx": JavaScriptParser(),
             "yaml": InfrastructureParser(),
             "json": InfrastructureParser(),
             "dockerfile": InfrastructureParser(),
@@ -40,6 +40,8 @@ class RepositoryParser:
 
         # Use Tree-sitter parsers for newly supported languages
         self.use_tree_sitter = True  # Flag to enable/disable Tree-sitter
+        from .tree_sitter_factory import TreeSitterFactory
+        TreeSitterFactory.ensure_query_files_exist()
 
         
     def parse(self) -> RepositoryStructure:

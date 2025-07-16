@@ -10,7 +10,7 @@ __all__ = [
     'BaseParser', 
     'PythonParser', 
     'JavaScriptParser',
-    'TreeSitterParser',
+    'TreeSitterParser',  
     'TreeSitterPythonParser',
     'TreeSitterJavaScriptParser',
     'TreeSitterGoParser'

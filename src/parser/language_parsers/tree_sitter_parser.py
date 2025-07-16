@@ -3,8 +3,10 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+# Import tree-sitter properly
 import tree_sitter
-import tree_sitter_languages as tsl
+from tree_sitter import Language, Parser
+import tree_sitter_languages
 
 from .base_parser import BaseParser
 from ..models.file_info import FileInfo
@@ -43,9 +45,11 @@ class TreeSitterParser(BaseParser):
         try:
             # Get Tree-sitter language
             ts_language = self._get_ts_language()
+            if not ts_language:
+                return False
             
             # Create parser
-            parser = tree_sitter.Parser()
+            parser = Parser()
             parser.set_language(ts_language)
             
             # Store parser in class variable
@@ -59,8 +63,13 @@ class TreeSitterParser(BaseParser):
             self.logger.error(f"Failed to initialize Tree-sitter parser for {self.language_name}: {str(e)}")
             return False
     
-    def _get_ts_language(self) -> tree_sitter.Language:
-        """Get Tree-sitter language for the specified language name."""
+    def _get_ts_language(self) -> Optional[Language]:
+        """
+        Get Tree-sitter language for the specified language name.
+        
+        Returns:
+            tree_sitter.Language instance or None if language not supported
+        """
         if self.language_name in self._languages:
             return self._languages[self.language_name]
             
@@ -77,19 +86,23 @@ class TreeSitterParser(BaseParser):
             'rust': 'rust',
             'c': 'c',
             'cpp': 'cpp',
-            'c_sharp': 'c_sharp',
+            'c_sharp': 'c-sharp',
             'php': 'php'
         }
         
-        ts_lang_name = ts_lang_map.get(self.language_name, self.language_name)
-        
+        ts_lang_name = ts_lang_map.get(self.language_name)
+        if not ts_lang_name:
+            self.logger.warning(f"No Tree-sitter language mapping for {self.language_name}")
+            return None
+            
         try:
-            language = tsl.get_language(ts_lang_name)
+            # Use tree_sitter_languages to get pre-compiled language
+            language = tree_sitter_languages.get_language(ts_lang_name)
             self._languages[self.language_name] = language
             return language
         except Exception as e:
             self.logger.error(f"Failed to load Tree-sitter language for {self.language_name}: {str(e)}")
-            raise ValueError(f"Unsupported language: {self.language_name}")
+            return None
     
     def _load_queries(self) -> None:
         """Load Tree-sitter queries for the language."""
@@ -107,13 +120,18 @@ class TreeSitterParser(BaseParser):
             self.logger.warning(f"No query file found for {self.language_name} at {query_path}")
             return
             
+        # Get language
+        language = self._languages.get(self.language_name)
+        if not language:
+            self.logger.warning(f"Cannot load queries without language for {self.language_name}")
+            return
+            
         try:
             # Load query file
             with open(query_path, 'r', encoding='utf-8') as f:
                 query_content = f.read()
                 
             # Compile query
-            language = self._get_ts_language()
             self._queries[self.language_name] = language.query(query_content)
             
         except Exception as e:
