@@ -6,3 +6,4 @@ openai
 numpy
 chromadb>=0.4.18
 python-dotenv>=1.0.0
+streamlit
