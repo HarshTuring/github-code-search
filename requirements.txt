@@ -7,3 +7,5 @@ numpy
 chromadb>=0.4.18
 python-dotenv>=1.0.0
 streamlit
+tree-sitter>=0.20.1
+tree-sitter-languages>=1.5.0
