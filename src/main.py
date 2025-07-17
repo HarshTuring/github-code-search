@@ -14,6 +14,8 @@ from parser.models.chunk import Chunk
 from embeddings import EmbeddingGenerator
 from embeddings import VectorStore, VectorStoreManager
 from query import QueryController
+from src.processing.parallel_processor import ParallelRepositoryProcessor
+import gc
 
 # Set up logging
 logging.basicConfig(
@@ -59,6 +61,70 @@ class GitHubCodeAnalyzer:
         self.current_repo_path: Optional[Path] = None
         self.current_parser: Optional[RepositoryParser] = None
         self.current_chunks: List[Chunk] = []
+
+    def process_repository_with_threading(self, repo_path, output_path, embeddings_path):
+        """Process a repository with the parallel processor."""
+        # Set up the parallel processor
+        processor = ParallelRepositoryProcessor(
+            repo_path=repo_path,
+            min_workers=2,
+            max_workers=os.cpu_count(),
+            memory_threshold=80,
+            cpu_threshold=90
+        )
+        
+        # Define a progress callback
+        def on_progress(status):
+            print(f"Progress: {status['completion_percentage']:.2f}% - "
+                  f"Processed: {status['processed_files']}/{status['total_files']} files")
+        
+        try:
+            # Process the repository
+            chunks = processor.process_repository(on_progress=on_progress)
+            
+            if not chunks:
+                print("No chunks were generated.")
+                return
+                
+            print(f"Generated {len(chunks)} chunks. Generating embeddings...")
+            
+            # Generate embeddings
+            embedding_generator = EmbeddingGenerator(
+                model_name="text-embedding-3-small",
+                cache_dir=os.path.join(output_path, "embedding_cache")
+            )
+            
+            # Process chunks in batches to avoid memory issues
+            batch_size = 50
+            all_embedded_chunks = []
+            
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i+batch_size]
+                print(f"Generating embeddings for batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1) // batch_size}")
+                
+                embedded_chunks = embedding_generator.generate_embeddings(batch)
+                all_embedded_chunks.extend(embedded_chunks)
+                
+                # Clear memory between batches
+                del batch
+                gc.collect()
+            
+            print(f"Generated embeddings for {len(all_embedded_chunks)} chunks")
+            
+            # Save the chunks to the vector store
+            repo_name = Path(repo_path).name
+            vector_store = VectorStore(repo_name, base_dir=embeddings_path)
+            
+            # Store in batches
+            for i in range(0, len(all_embedded_chunks), batch_size):
+                batch = all_embedded_chunks[i:i+batch_size]
+                vector_store.add_chunks(batch)
+            
+            print(f"Repository processing complete. Chunks stored in vector database.")
+            
+        finally:
+            # Clean up resources
+            processor.shutdown()
 
     def store_embeddings(self, chunks: List[Chunk], repo_name: str) -> Dict[str, Any]:
         """
@@ -146,101 +212,23 @@ class GitHubCodeAnalyzer:
             logger.error(f"Failed to download repository: {e}")
             return {'success': False, 'error': f'Download failed: {str(e)}'}
         
-        # Step 2: Parse the repository
         try:
-            self.current_parser = RepositoryParser(str(repo_path))
-            repo_structure = self.current_parser.parse()
-            logger.info(f"Repository structure parsed: {repo_structure.file_count} files found")
+            self.process_repository_with_threading(
+                repo_path=str(self.current_repo_path),
+                output_path=str(self.output_path),
+                embeddings_path=str(self.embeddings_path)
+            )
+            repo_name = self._get_repo_name_from_url(github_url)
+            return {
+                'success': True,
+                'message': f'Successfully processed {repo_name} using parallel processing.',
+                'repo_name': repo_name,
+                'repo_path': str(self.current_repo_path)
+            }
         except Exception as e:
-            logger.error(f"Failed to parse repository structure: {e}")
-            return {'success': False, 'error': f'Parsing failed: {str(e)}'}
-        
-        # Step 3: Generate code chunks
-        try:
-            self.current_chunks = self.current_parser.create_chunks(verbose=verbose)
-            logger.info(f"Generated {len(self.current_chunks)} code chunks")
-        except Exception as e:
-            logger.error(f"Failed to generate code chunks: {e}")
-            return {'success': False, 'error': f'Chunking failed: {str(e)}'}
-        
-        repo_name = self._get_repo_name_from_url(github_url)
+            logger.error(f"Failed to process repository with threading: {e}")
+            return {'success': False, 'error': f'Processing failed: {str(e)}'}
 
-        embedding_info = {'generated': False}
-        if generate_embeddings and self.current_chunks:
-            try:
-                logger.info(f"Generating embeddings for {len(self.current_chunks)} chunks using {embedding_model}")
-                
-                # Set cache directory if not specified
-                if cache_dir is None and cache_embeddings:
-                    cache_dir = str(self.output_path / "embedding_cache")
-                    
-                embedding_generator = EmbeddingGenerator(
-                    model_name=embedding_model,
-                    api_key=api_key,
-                    use_cache=cache_embeddings,
-                    cache_dir=cache_dir
-                )
-                
-                self.current_chunks = embedding_generator.generate_embeddings(
-                    self.current_chunks,
-                    show_progress=verbose
-                )
-                
-                embedding_count = sum(1 for chunk in self.current_chunks 
-                                    if chunk.metadata and 'embedding' in chunk.metadata)
-                
-                # Get cache statistics if available
-                cache_stats = {}
-                if cache_embeddings and embedding_generator.cache:
-                    cache_stats = embedding_generator.cache.get_stats()
-                
-                embedding_info = {
-                    'generated': True,
-                    'model': embedding_model,
-                    'dimension': embedding_generator.dimension,
-                    'count': embedding_count,
-                    'cache': cache_stats if cache_stats else {'enabled': cache_embeddings}
-                }
-                
-                logger.info(f"Successfully generated {embedding_count} embeddings")
-                
-                # Store embeddings in vector database if requested
-                if store_embeddings and embedding_count > 0:
-                    storage_result = self.store_embeddings(self.current_chunks, repo_name)
-                    embedding_info['storage'] = storage_result
-                    
-            except Exception as e:
-                logger.error(f"Failed to generate embeddings: {e}")
-                embedding_info = {
-                    'generated': False,
-                    'error': str(e)
-                }
-        
-        # Step 4: Save results
-        try:
-            output_dir = self._get_output_dir_for_repo(github_url)
-            self.save_chunks(output_dir)
-            logger.info(f"Analysis results saved to: {output_dir}")
-        except Exception as e:
-            logger.error(f"Failed to save analysis results: {e}")
-            return {'success': False, 'error': f'Saving results failed: {str(e)}'}
-        
-        # Compile statistics
-        stats = self._generate_statistics()
-        
-        # Add embedding info to the result
-        result = {
-        'success': True,
-        'repository': github_url,
-        'name': repo_name,
-        'download_path': str(self.current_repo_path),
-        'output_path': str(output_dir),
-        'statistics': stats,
-        'embeddings': embedding_info
-        }
-        
-        return result
-    
     def query_repository(self, repo_name: str, query_text: str, 
                      filters: Optional[Dict] = None, top_k: int = 5,
                      model: str = "gpt-4o-mini") -> Dict[str, Any]:
