@@ -10,6 +10,7 @@ from .language_parsers.base_parser import BaseParser
 from .language_parsers.javascript_parser import JavaScriptParser
 from .language_parsers.infrastructure_parser import InfrastructureParser
 
+from .tree_sitter_factory import TreeSitterFactory
 
 class RepositoryParser:
     """Parses a repository and creates chunks of code."""
@@ -24,6 +25,7 @@ class RepositoryParser:
         
         # Initialize parsers
         self.parsers: Dict[str, BaseParser] = {
+            # Maintain existing parsers for backward compatibility
             "python": PythonParser(),
             "javascript": JavaScriptParser(),
             "typescript": JavaScriptParser(),
@@ -33,9 +35,13 @@ class RepositoryParser:
             "dockerfile": InfrastructureParser(),
             "terraform": InfrastructureParser(),
             "shell": InfrastructureParser(),
-            # Add other language parsers here
         }
         self.infrastructure_parser = InfrastructureParser()
+
+        # Use Tree-sitter parsers for newly supported languages
+        self.use_tree_sitter = True  # Flag to enable/disable Tree-sitter
+        from .tree_sitter_factory import TreeSitterFactory
+        TreeSitterFactory.ensure_query_files_exist()
 
         
     def parse(self) -> RepositoryStructure:
@@ -61,7 +67,7 @@ class RepositoryParser:
                 self.repo_structure.files[file_path] = updated_file_info
         
         return self.repo_structure
-        
+
     def create_chunks(self, verbose=False) -> List[Chunk]:
         """Create code chunks from the repository."""
         if not self.repo_structure.files:
@@ -92,10 +98,18 @@ class RepositoryParser:
                     print(f"  Skipping unsupported file: {file_path}")
                 continue
                 
-            # Get the appropriate parser
+            # Try to get a parser
+            parser = None
+            
+            # First check if we have a custom parser
             parser = self.parsers.get(file_info.language)
+            
+            # If no custom parser and Tree-sitter is enabled, try Tree-sitter
+            if not parser and self.use_tree_sitter:
+                parser = TreeSitterFactory.get_parser(file_info.language)
+                
             if parser:
-                # Create chunks using the language parser
+                # Create chunks using the parser
                 try:
                     file_chunks = parser.create_chunks(file_info)
                     if file_chunks:
@@ -135,7 +149,7 @@ class RepositoryParser:
                 print(f"  {lang}: {count} chunks")
         
         return chunks
-    
+
     def _discover_files(self) -> None:
         """Traverse the repository and discover files."""
         # Skip directories typically not needed
@@ -163,10 +177,15 @@ class RepositoryParser:
                     size_bytes=file_path.stat().st_size if file_path.exists() else 0
                 )
                 
-                # If we have a parser for this language, parse the file
+                # If we have a custom parser for this language, use it
                 if language in self.parsers and not is_binary:
                     parser = self.parsers[language]
                     file_info = parser.parse_file(file_path)
+                # Otherwise, if Tree-sitter supports this language, use it
+                elif self.use_tree_sitter and TreeSitterFactory.supports_language(language) and not is_binary:
+                    ts_parser = TreeSitterFactory.get_parser(language)
+                    if ts_parser:
+                        file_info = ts_parser.parse_file(file_path)
                     
                 # Add to repository structure
                 self.repo_structure.add_file(file_info)
