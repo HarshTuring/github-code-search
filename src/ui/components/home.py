@@ -432,7 +432,7 @@ def render_home():
     repo_to_process = None
     
     # Check if we're processing from the form
-    if submit_button and st.query_params.get('tab') == 'repo':
+    if submit_button:
         if not repo_url:
             st.error("Please enter a GitHub repository URL.")
             return
