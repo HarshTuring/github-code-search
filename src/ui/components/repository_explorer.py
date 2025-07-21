@@ -6,6 +6,8 @@ from src.embeddings.vector_store import VectorStoreManager
 from src.ui.components.file_explorer import render_file_explorer
 from src.ui.components.code_viewer import render_code_viewer
 from src.ui.components.file_summary import render_file_summary
+from src.ui.components.repository_search import render_repository_search
+
 
 def get_available_repositories():
     """
@@ -114,21 +116,36 @@ def render_file_explorer_interface():
     
     st.title(f"Exploring: {st.session_state.repo_name}")
     
-    # Create a two-column layout
-    col1, col2 = st.columns([1, 2])
+    # Add tabs for file explorer and search
+    tab1, tab2 = st.tabs(["File Explorer", "Search"])
     
-    # Left column: File Explorer
-    with col1:
-        render_file_explorer()
-    
-    # Right column: Code Viewer and Summary
-    with col2:
-        # Render code viewer, which returns file content if successful
-        file_content = render_code_viewer()
+    with tab1:
+        # Create a two-column layout
+        col1, col2 = st.columns([1, 2])
         
-        # Render file summary component if we have file content
-        if file_content is not None:
-            render_file_summary(file_content)
+        # Left column: File Explorer
+        with col1:
+            render_file_explorer()
+        
+        # Right column: Code Viewer and Summary
+        with col2:
+            # Render code viewer, which returns file content if successful
+            file_content = render_code_viewer()
+            
+            # Render file summary component if we have file content
+            if file_content is not None:
+                render_file_summary(file_content)
+    
+    with tab2:
+        # Render search interface
+        render_repository_search()
+        
+        # If a file is selected from search, show it
+        if st.session_state.get("selected_file"):
+            st.markdown("---")
+            file_content = render_code_viewer()
+            if file_content is not None:
+                render_file_summary(file_content)
 
 def render_repository_explorer():
     """

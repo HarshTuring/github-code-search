@@ -64,7 +64,7 @@ def is_binary_file(file_path, sample_size=1024):
 def render_code_viewer():
     """Render the code viewer component."""
     if "selected_file" not in st.session_state or not st.session_state.selected_file:
-        st.info("Select a file from the file explorer to view its contents.")
+        st.info("Select a file from the file explorer or search results to view its contents.")
         return None
         
     if "repo_path" not in st.session_state or not st.session_state.repo_path:
@@ -101,12 +101,51 @@ def render_code_viewer():
     try:
         with open(file_abs_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
+            lines = content.split('\n')
         
         # Determine language for syntax highlighting
         language = determine_language(file_rel_path)
         
-        # Display code with syntax highlighting
-        st.code(content, language=language)
+        # Check if we should highlight a specific line
+        if "goto_line" in st.session_state:
+            line_num = st.session_state.goto_line
+            
+            # Create a highlighted version of the content
+            highlighted_lines = lines.copy()
+            if 1 <= line_num <= len(highlighted_lines):
+                # Add a marker to the line (→)
+                highlighted_lines[line_num-1] = f"→ {highlighted_lines[line_num-1]}"
+            
+            # Display lines around the highlighted line
+            start_line = max(0, line_num - 10)
+            end_line = min(len(highlighted_lines), line_num + 10)
+            
+            # Show line numbers
+            with_line_nums = []
+            for i in range(start_line, end_line):
+                if i == line_num - 1:
+                    # This is the highlighted line
+                    with_line_nums.append(f"{i+1}: {highlighted_lines[i]}")
+                else:
+                    with_line_nums.append(f"{i+1}: {lines[i]}")
+            
+            trimmed_content = '\n'.join(with_line_nums)
+            
+            # Add a note that we're showing a partial file
+            if start_line > 0 or end_line < len(lines):
+                st.info(f"Showing lines {start_line+1}-{end_line} (file has {len(lines)} lines)")
+            
+            # Show the highlighted content
+            st.code(trimmed_content, language=language)
+            
+            # Add a button to show the full file
+            if st.button("Show Full File"):
+                del st.session_state.goto_line
+                st.rerun()
+            
+        else:
+            # Display the full content with syntax highlighting
+            st.code(content, language=language)
         
         # Return content for potential use by summary component
         return content

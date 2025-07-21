@@ -48,6 +48,16 @@ def initialize_state():
     if "file_summaries" not in st.session_state:
         st.session_state.file_summaries = {}  # Cache for generated summaries
 
+    # Search state
+    if "search_performed" not in st.session_state:
+        st.session_state.search_performed = False
+    if "search_results" not in st.session_state:
+        st.session_state.search_results = {}
+    if "search_query" not in st.session_state:
+        st.session_state.search_query = ""
+    if "goto_line" not in st.session_state:
+        st.session_state.goto_line = None
+
 def navigate_to(page):
     """
     Change the current page.
