@@ -31,80 +31,133 @@ def render_file_explorer():
     if "file_tree_expanded_dirs" not in st.session_state:
         st.session_state.file_tree_expanded_dirs = set([""])  # Root is expanded by default
     
-    # Display the file tree starting from root
-    _render_directory("", repo_path)
+    # Build a complete file tree structure for flat rendering
+    file_tree = _build_file_tree(repo_path)
+    
+    # Render the file tree in a flat structure with visual indentation
+    _render_flat_file_tree(file_tree, repo_path)
 
-def _render_directory(rel_dir_path, repo_base_path):
-    """Recursively render directory contents with lazy loading.
+def _build_file_tree(repo_path):
+    """
+    Build a tree structure representing the repository contents.
     
     Args:
-        rel_dir_path: Relative path from repository root
-        repo_base_path: Absolute base path of the repository
+        repo_path: Path to repository
+        
+    Returns:
+        dict: A nested dictionary representing the file tree
     """
-    abs_dir_path = os.path.join(repo_base_path, rel_dir_path) if rel_dir_path else repo_base_path
+    tree = {}
     
-    try:
-        # Get directory entries
-        entries = os.listdir(abs_dir_path)
+    # Walk through the repository
+    for root, dirs, files in os.walk(repo_path):
+        # Skip hidden directories
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
         
-        # Split into directories and files, and sort both
-        dirs = sorted([e for e in entries if os.path.isdir(os.path.join(abs_dir_path, e)) and not e.startswith('.')])
-        files = sorted([e for e in entries if os.path.isfile(os.path.join(abs_dir_path, e)) and not e.startswith('.')])
+        # Get the relative path from the repo root
+        rel_path = os.path.relpath(root, repo_path)
+        if rel_path == '.':
+            rel_path = ''
         
-        # Process directories
-        for dirname in dirs:
-            dir_rel_path = os.path.join(rel_dir_path, dirname) if rel_dir_path else dirname
-            dir_id = f"dir_{dir_rel_path.replace(os.path.sep, '_').replace(' ', '_').replace('.', '_')}"
-            
-            # Check if directory is expanded in session state
-            is_expanded = dir_rel_path in st.session_state.file_tree_expanded_dirs
-            
-            # Create expander for directory
-            with st.expander(f"📁 {dirname}", expanded=is_expanded):
-                # Mark as expanded when user opens it
-                if not is_expanded:
-                    st.session_state.file_tree_expanded_dirs.add(dir_rel_path)
+        # Skip hidden files
+        files = [f for f in files if not f.startswith('.')]
+        
+        # Find current position in the tree
+        current = tree
+        if rel_path:
+            parts = rel_path.split(os.path.sep)
+            for part in parts:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+        
+        # Add files (marked with None as value)
+        for file in sorted(files):
+            current[file] = None
+    
+    return tree
+
+def _render_flat_file_tree(tree, repo_path, prefix="", path=""):
+    """
+    Render the file tree as a flat structure with indentation.
+    
+    Args:
+        tree: The file tree dictionary
+        repo_path: Base repository path
+        prefix: Current indentation prefix
+        path: Current path in the repository
+    """
+    # Sort items to show directories first, then files
+    items = sorted(tree.items(), key=lambda x: (x[1] is None, x[0]))
+    
+    for name, subtree in items:
+        full_path = os.path.join(path, name)
+        is_dir = subtree is not None
+        
+        # Calculate indentation
+        indent = "│   " * (prefix.count("│") + (1 if prefix and not prefix.endswith("└─ ") else 0))
+        
+        # Create a unique key for this item
+        item_id = f"tree_item_{full_path.replace('/', '_').replace(' ', '_').replace('.', '_')}"
+        
+        # Display directory or file with indentation
+        cols = st.columns([3, 1, 1])
+        
+        # Icon and indentation for file/directory
+        icon = "📁" if is_dir else "📄"
+        display_name = f"{prefix}{icon} {name}"
+        
+        with cols[0]:
+            # For directories, add a toggle button
+            if is_dir:
+                # Check if directory is expanded
+                is_expanded = full_path in st.session_state.file_tree_expanded_dirs
                 
-                # Only render contents if expanded
-                _render_directory(dir_rel_path, repo_base_path)
+                # Create a button that toggles expansion
+                if st.button(
+                    display_name + (" 🔽" if is_expanded else " ▶️"), 
+                    key=item_id
+                ):
+                    # Toggle directory expansion
+                    if full_path in st.session_state.file_tree_expanded_dirs:
+                        st.session_state.file_tree_expanded_dirs.remove(full_path)
+                    else:
+                        st.session_state.file_tree_expanded_dirs.add(full_path)
+                    st.rerun()
+            else:
+                # For files, create a selectable button
+                if st.button(display_name, key=item_id):
+                    st.session_state.selected_file = full_path
+                    st.rerun()
         
-        # Process files with metadata in a more structured layout
-        for filename in files:
-            file_rel_path = os.path.join(rel_dir_path, filename) if rel_dir_path else filename
-            file_abs_path = os.path.join(abs_dir_path, filename)
-            file_id = f"file_{file_rel_path.replace(os.path.sep, '_').replace(' ', '_').replace('.', '_')}"
-            
-            # Get file metadata
+        # Only show metadata for files
+        if not is_dir:
+            file_path = os.path.join(repo_path, full_path)
             try:
-                file_size = os.path.getsize(file_abs_path)
-                mod_time = os.path.getmtime(file_abs_path)
-                size_str = get_file_size_str(file_size)
-                mod_time_str = datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                size_str = "N/A"
-                mod_time_str = "N/A"
-            
-            # Create a container with hover effect for each file
-            with st.container():
-                # Highlight the selected file
-                is_selected = st.session_state.get('selected_file') == file_rel_path
-                bg_color = "#f0f7ff" if is_selected else "transparent"
-                
-                # Create columns with proper alignment and spacing
-                cols = st.columns([3, 1, 1])
-                with cols[0]:
-                    if st.button(f"📄 {filename}", key=file_id):
-                        st.session_state.selected_file = file_rel_path
-                        st.rerun()
+                file_size = os.path.getsize(file_path)
+                mod_time = os.path.getmtime(file_path)
                 with cols[1]:
-                    st.text(size_str)
+                    st.write(get_file_size_str(file_size))
                 with cols[2]:
-                    st.text(mod_time_str)
+                    st.write(datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d"))
+            except Exception:
+                with cols[1]:
+                    st.write("N/A")
+                with cols[2]:
+                    st.write("N/A")
+        
+        # If this is a directory and it's expanded, show its contents
+        if is_dir and full_path in st.session_state.file_tree_expanded_dirs:
+            # Adjust prefix for the next level of items
+            if prefix:
+                new_prefix = prefix.replace("└─ ", "    ").replace("├─ ", "│   ")
+            else:
+                new_prefix = ""
                 
-                # Add a subtle divider after each file
-                st.markdown('<hr style="margin: 0.1em 0; border: none; height: 1px; background-color: #f0f0f0;">', unsafe_allow_html=True)
-    
-    except PermissionError:
-        st.warning(f"Permission denied: {rel_dir_path}")
-    except Exception as e:
-        st.error(f"Error reading directory: {str(e)}")
+            # Recursively render the subtree
+            _render_flat_file_tree(
+                subtree, 
+                repo_path, 
+                new_prefix + "├─ " if subtree else new_prefix + "└─ ",
+                full_path
+            )

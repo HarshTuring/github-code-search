@@ -20,40 +20,54 @@ def generate_file_summary(file_path, file_content, language):
         file_content = file_content[:max_length] 
         is_truncated = True
     
-    # Create enhanced prompt for LLM
+    # Enhanced prompt for detailed file analysis
     prompt = f"""
-    You are a senior software engineer tasked with analyzing and explaining code files.
-    
-    Please analyze the following {language.upper()} file and provide a comprehensive summary that includes:
+    # CODE ANALYSIS TASK
 
-    1. MAIN PURPOSE: Explain the primary purpose and responsibility of this file within the codebase.
-    
-    2. KEY COMPONENTS:
-       - Identify and explain important classes, functions, or methods
-       - Highlight any interfaces, enums, or data structures defined
-       - Describe the relationships between these components
-    
-    3. DEPENDENCIES:
-       - List major external libraries or modules imported
-       - Explain how these dependencies are used
-       - Identify dependencies on other parts of the codebase
-    
-    4. ARCHITECTURAL PATTERNS:
-       - Identify any design patterns or architectural approaches used
-       - Explain how the code is structured and why
-       - Note any notable algorithmic techniques
-    
-    5. POTENTIAL ISSUES OR IMPROVEMENTS:
-       - Identify any potential code smells, performance concerns, or security issues
-       - Suggest possible improvements (optional)
+    As a senior software architect specializing in code analysis, please analyze this code file and provide a thorough explanation of its functionality, structure, and purpose.
 
-    Format your response in Markdown with clear headings and bullet points where appropriate.
-    Focus on being thorough but concise, emphasizing the most important aspects of the file.
-    
-    FILE NAME: {os.path.basename(file_path)}
-    FILE LANGUAGE: {language}
-    {f"NOTE: This file was truncated due to size limitations. Analysis is based on the first {max_length} characters only." if is_truncated else ""}
-    
+    ## File Details
+    - **Filename**: {os.path.basename(file_path)}
+    - **Language**: {language.upper()}
+    - **File Path**: {file_path}
+    {f"- **NOTE**: This file was truncated due to size limitations. Analysis is based on the first {max_length} characters only." if is_truncated else ""}
+
+    ## Analysis Requirements
+    Please structure your analysis as follows:
+
+    ### 1. Primary Purpose
+    Provide a clear, concise explanation of what this file does and its role in the overall system.
+
+    ### 2. Key Components
+    Identify and explain:
+    - Main classes/functions/methods and their purposes
+    - Important data structures
+    - Key algorithms or business logic
+    - Any API endpoints or interfaces exposed
+
+    ### 3. Dependencies and Relationships
+    Analyze:
+    - External libraries/frameworks used and why
+    - Dependencies on other system components
+    - How this file fits into the larger application architecture
+
+    ### 4. Design Patterns and Architecture
+    Identify:
+    - Any design patterns implemented
+    - Architectural principles followed
+    - Code organization approaches
+
+    ### 5. Technical Details
+    Note any:
+    - Interesting implementation details
+    - Performance considerations
+    - Error handling approaches
+    - Security considerations (if apparent)
+
+    Write your analysis in a professional but accessible style, using markdown formatting for readability.
+    Focus on providing insights that would help a developer understand this file's role and functionality quickly.
+
+    ## CODE TO ANALYZE
     ```{language}
     {file_content}
     ```
@@ -96,37 +110,30 @@ def render_file_summary(file_content=None):
     else:
         # Generate summary button
         st.markdown("---")
-        st.button("Generate File Summary", 
-                key=f"gen_summary_{file_rel_path}", 
-                on_click=lambda: _generate_and_cache_summary(file_rel_path, file_content),
-                use_container_width=True)
-
-def _generate_and_cache_summary(file_rel_path, file_content=None):
-    """Generate and cache a file summary.
-    
-    Helper function to be used with on_click.
-    
-    Args:
-        file_rel_path: Relative path to the file
-        file_content: File content if already loaded
-    """
-    try:
-        if file_content is None:
-            # Read content if not provided
-            file_abs_path = os.path.join(st.session_state.repo_path, file_rel_path)
-            with open(file_abs_path, 'r', encoding='utf-8', errors='replace') as f:
-                file_content = f.read()
-        
-        # Determine language
-        from src.ui.components.code_viewer import determine_language
-        language = determine_language(file_rel_path)
-        
-        # Generate summary
-        summary = generate_file_summary(file_rel_path, file_content, language)
-        
-        # Cache the summary
-        st.session_state.file_summaries[file_rel_path] = summary
-        
-    except Exception as e:
-        # Store error message in session state
-        st.session_state.file_summaries[file_rel_path] = f"Error generating summary: {str(e)}"
+        if st.button("Generate File Summary", key=f"gen_summary_{file_rel_path}", use_container_width=True):
+            with st.spinner("Generating file summary..."):
+                try:
+                    if file_content is None:
+                        # Read content if not provided
+                        file_abs_path = os.path.join(st.session_state.repo_path, file_rel_path)
+                        with open(file_abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                            file_content = f.read()
+                    
+                    # Determine language
+                    from src.ui.components.code_viewer import determine_language
+                    language = determine_language(file_rel_path)
+                    
+                    # Generate summary
+                    summary = generate_file_summary(file_rel_path, file_content, language)
+                    
+                    # Cache the summary
+                    st.session_state.file_summaries[file_rel_path] = summary
+                    
+                    # Force UI refresh
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Error generating summary: {str(e)}")
+                    # Cache the error message
+                    st.session_state.file_summaries[file_rel_path] = f"⚠️ Error generating summary: {str(e)}"
+                    st.rerun()
