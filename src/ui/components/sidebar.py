@@ -19,6 +19,9 @@ def render_sidebar():
         vector_store_manager = VectorStoreManager()
         repositories = vector_store_manager.list_repositories()
         has_repositories = len(repositories) > 0
+
+        button_disabled = not (st.session_state.repo_loaded or has_repositories)
+
         
         # Enable chat button if a repo is loaded or if repositories exist
         chat_btn = st.button(
@@ -28,6 +31,15 @@ def render_sidebar():
         )
         if chat_btn:
             navigate_to("chat")
+        
+        # Add button for repository explorer
+        explorer_btn = st.button(
+            "Repository Explorer",
+            disabled=button_disabled,
+            use_container_width=True
+        )
+        if explorer_btn:
+            navigate_to("explorer")
         
         # Repository information
         if st.session_state.repo_loaded:

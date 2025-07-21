@@ -37,6 +37,16 @@ def initialize_state():
         st.session_state.messages = []
     if "query" not in st.session_state:
         st.session_state.query = ""
+    
+    # Repository explorer state
+    if "exploring_repository" not in st.session_state:
+        st.session_state.exploring_repository = False
+    if "file_tree_expanded_dirs" not in st.session_state:
+        st.session_state.file_tree_expanded_dirs = set([""])  # Root is expanded by default
+    if "selected_file" not in st.session_state:
+        st.session_state.selected_file = None
+    if "file_summaries" not in st.session_state:
+        st.session_state.file_summaries = {}  # Cache for generated summaries
 
 def navigate_to(page):
     """

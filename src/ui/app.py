@@ -3,6 +3,7 @@ from src.ui.state import initialize_state
 from src.ui.components.home import render_home
 from src.ui.components.sidebar import render_sidebar
 from src.ui.components.chat import render_chat
+from src.ui.components.repository_explorer import render_repository_explorer
 
 def run_app():
     """
@@ -20,6 +21,8 @@ def run_app():
         render_home()
     elif st.session_state.current_page == "chat":
         render_chat()
+    elif st.session_state.current_page == "explorer":  # New page
+        render_repository_explorer()
     else:
         # Fallback to home page
         render_home()
