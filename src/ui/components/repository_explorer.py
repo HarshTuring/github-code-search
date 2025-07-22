@@ -7,6 +7,8 @@ from src.ui.components.file_explorer import render_file_explorer
 from src.ui.components.code_viewer import render_code_viewer
 from src.ui.components.file_summary import render_file_summary
 from src.ui.components.repository_search import render_repository_search
+from src.ui.components.file_chat import render_file_chat
+
 
 
 def get_available_repositories():
@@ -117,7 +119,7 @@ def render_file_explorer_interface():
     st.title(f"Exploring: {st.session_state.repo_name}")
     
     # Add tabs for file explorer and search
-    tab1, tab2 = st.tabs(["File Explorer", "Search"])
+    tab1, tab2, tab3 = st.tabs(["File Explorer", "Search", "File Chat"])
     
     with tab1:
         # Create a two-column layout
@@ -146,6 +148,18 @@ def render_file_explorer_interface():
             file_content = render_code_viewer()
             if file_content is not None:
                 render_file_summary(file_content)
+    
+    with tab3:
+        # In the file chat tab
+        if st.session_state.get("selected_file"):
+            # First display the selected file
+            display_selected_file()
+            
+            # Then render the file-specific chat interface
+            render_file_chat()
+        else:
+            st.info("Select a file from the File Explorer or Search tab to start a chat about that file.")
+
 
 def render_repository_explorer():
     """
@@ -157,3 +171,9 @@ def render_repository_explorer():
         render_repository_list()
     else:
         render_file_explorer_interface()
+
+def display_selected_file():
+    """Helper function to display the selected file and its summary."""
+    file_content = render_code_viewer()
+    if file_content is not None:
+        render_file_summary(file_content)

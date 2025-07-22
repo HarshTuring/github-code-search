@@ -42,3 +42,27 @@ class LLMClient:
             return response.choices[0].message.content
         except Exception as e:
             raise Exception(f"Error generating response: {str(e)}")
+    
+    def generate_with_system_prompt(self, system_prompt, user_prompt):
+        """Generate a response with a custom system prompt.
+        
+        Args:
+            system_prompt (str): The system prompt defining the assistant's role and context
+            user_prompt (str): The user's question or prompt
+            
+        Returns:
+            str: The generated response.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",  # or whichever model you're using
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                max_tokens=1500
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            raise Exception(f"Error generating response: {str(e)}")
