@@ -107,12 +107,15 @@ def render_code_viewer():
         language = determine_language(file_rel_path)
         
         # Check if we should highlight a specific line
-        if "goto_line" in st.session_state:
-            line_num = st.session_state.goto_line
-            
+        if "goto_line" in st.session_state and st.session_state.goto_line is not None:
+            try:
+                line_num = int(st.session_state.goto_line)
+            except (ValueError, TypeError):
+                line_num = None
+                
             # Create a highlighted version of the content
             highlighted_lines = lines.copy()
-            if 1 <= line_num <= len(highlighted_lines):
+            if line_num is not None and 1 <= line_num <= len(highlighted_lines):
                 # Add a marker to the line (→)
                 highlighted_lines[line_num-1] = f"→ {highlighted_lines[line_num-1]}"
             

@@ -79,6 +79,13 @@ def generate_file_summary(file_path, file_content, language):
     
     return response.strip()
 
+def get_unique_key(prefix):
+    """Generate a unique key using a session counter."""
+    if "_key_counter" not in st.session_state:
+        st.session_state._key_counter = 0
+    st.session_state._key_counter += 1
+    return f"{prefix}_{st.session_state._key_counter}"
+
 def render_file_summary(file_content=None):
     """Render the file summary component.
     
@@ -103,14 +110,16 @@ def render_file_summary(file_content=None):
         st.markdown("## File Summary")
         st.markdown(summary)
         
-        # Add refresh button
-        if st.button("Regenerate Summary", key=f"refresh_{file_rel_path}"):
+        # Add refresh button with unique key
+        refresh_key = get_unique_key(f"refresh_{os.path.basename(file_rel_path)}")
+        if st.button("Regenerate Summary", key=refresh_key):
             del st.session_state.file_summaries[file_rel_path]
             st.rerun()
     else:
-        # Generate summary button
+        # Generate summary button with unique key
         st.markdown("---")
-        if st.button("Generate File Summary", key=f"gen_summary_{file_rel_path}", use_container_width=True):
+        gen_key = get_unique_key(f"gen_summary_{os.path.basename(file_rel_path)}")
+        if st.button("Generate File Summary", key=gen_key, use_container_width=True):
             with st.spinner("Generating file summary..."):
                 try:
                     if file_content is None:
