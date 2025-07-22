@@ -10,65 +10,79 @@ def render_file_chat():
         return
     
     file_path = st.session_state.selected_file
+    chat_key = f"file_chat_{file_path.replace('/', '_')}"
     
     # Initialize file chat messages if not exist for this file
-    chat_key = f"file_chat_{file_path.replace('/', '_')}"
     if chat_key not in st.session_state:
         st.session_state[chat_key] = [
             {"role": "assistant", "content": f"Ask me anything about the file `{os.path.basename(file_path)}`"}
         ]
     
-    st.markdown("---")
-    st.markdown("## Chat with this File")
-    st.caption("Ask questions specifically about this file's code and functionality.")
+    # Create a container for the chat header
+    header = st.container()
     
-    # Display chat messages
-    for message in st.session_state[chat_key]:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Create a container for chat messages
+    chat_container = st.container()
     
-    # Input field for the user's message
-    if prompt := st.chat_input("Ask about this file...", key=f"file_chat_input_{file_path.replace('/', '_')}"):
-        # Add the user's message to the chat
-        st.session_state[chat_key].append({"role": "user", "content": prompt})
-        
-        # Display the user's message
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Generate and display the assistant's response
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
+    # Create a container for the input at the bottom
+    input_container = st.container()
+    
+    # Display header
+    with header:
+        st.markdown("---")
+        st.markdown("## Chat with this File")
+        st.caption("Ask questions specifically about this file's code and functionality.")
+    
+    # Display chat messages in the chat container
+    with chat_container:
+        for message in st.session_state[chat_key]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+    
+    # Handle user input in the input container at the bottom
+    with input_container:
+        if prompt := st.chat_input("Ask about this file...", key=f"file_chat_input_{file_path.replace('/', '_')}"):
+            # Add the user's message to the chat
+            st.session_state[chat_key].append({"role": "user", "content": prompt})
             
-            try:
-                with st.spinner("Generating response..."):
-                    # Load file content
-                    file_abs_path = os.path.join(st.session_state.repo_path, file_path)
-                    with open(file_abs_path, 'r', encoding='utf-8', errors='replace') as f:
-                        file_content = f.read()
+            # Display the user's message in the chat container
+            with chat_container:
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                
+                # Generate and display the assistant's response
+                with st.chat_message("assistant"):
+                    message_placeholder = st.empty()
                     
-                    # Determine language for better context
-                    language = determine_language(file_path)
-                    
-                    # Generate a response about the specific file
-                    response = generate_file_chat_response(prompt, file_path, file_content, language, st.session_state[chat_key])
-                    
-                    # Display the response with a typing effect
-                    full_response = ""
-                    for chunk in response.split():
-                        full_response += chunk + " "
-                        time.sleep(0.01)  # Fast typing effect
-                        message_placeholder.markdown(full_response + "▌")
-                    
-                    message_placeholder.markdown(full_response)
-                    
-                    # Add the response to the chat history
-                    st.session_state[chat_key].append({"role": "assistant", "content": full_response})
-                    
-            except Exception as e:
-                error_message = f"Error generating response: {str(e)}"
-                message_placeholder.error(error_message)
-                st.session_state[chat_key].append({"role": "assistant", "content": error_message})
+                    try:
+                        with st.spinner("Generating response..."):
+                            # Load file content
+                            file_abs_path = os.path.join(st.session_state.repo_path, file_path)
+                            with open(file_abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                                file_content = f.read()
+                            
+                            # Determine language for better context
+                            language = determine_language(file_path)
+                            
+                            # Generate a response about the specific file
+                            response = generate_file_chat_response(prompt, file_path, file_content, language, st.session_state[chat_key])
+                            
+                            # Display the response with a typing effect
+                            full_response = ""
+                            for chunk in response.split():
+                                full_response += chunk + " "
+                                time.sleep(0.01)  # Fast typing effect
+                                message_placeholder.markdown(full_response + "▌")
+                            
+                            message_placeholder.markdown(full_response)
+                            
+                            # Add the response to the chat history
+                            st.session_state[chat_key].append({"role": "assistant", "content": full_response})
+                            
+                    except Exception as e:
+                        error_message = f"Error generating response: {str(e)}"
+                        message_placeholder.error(error_message)
+                        st.session_state[chat_key].append({"role": "assistant", "content": error_message})
 
 def generate_file_chat_response(prompt, file_path, file_content, language, conversation_history):
     """
